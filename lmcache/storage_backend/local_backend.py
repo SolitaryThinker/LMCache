@@ -13,7 +13,7 @@ from lmcache.logging import init_logger
 from lmcache.storage_backend.abstract_backend import LMCBackendInterface
 from lmcache.storage_backend.evictor import LRUEvictor
 from lmcache.storage_backend.evictor.base_evictor import PutStatus
-from lmcache.utils import CacheEngineKey, KVCache, _lmcache_nvtx_annotate
+from lmcache.utils import CacheEngineKey, KVCache, DiskCacheMetadata, _lmcache_nvtx_annotate
 
 logger = init_logger(__name__)
 
@@ -113,6 +113,7 @@ class LMCLocalBackend(LMCBackendInterface):
         evict_keys, put_status = self.evictor.update_on_put(
             self.dict, kv_chunk_local)
         if put_status == PutStatus.ILLEGAL:
+            self.update_lock.release()
             return
 
         # evict caches
@@ -184,14 +185,14 @@ class LMCLocalBackend(LMCBackendInterface):
             the kv cache of the token chunk, in the format of nested tuples
             None if the key is not found
         """
+        self.update_lock.acquire()
         kv_chunk = self.dict.get(key, None)
 
         # Update cache recency
         if kv_chunk is not None:
-            self.update_lock.acquire()
             self.evictor.update_on_get(key, self.dict)
-            self.update_lock.release()
             kv_chunk = kv_chunk.to(self.dst_device)
+        self.update_lock.release()
         return kv_chunk
 
     def close(self):
@@ -226,7 +227,8 @@ class LMCLocalDiskBackend(LMCBackendInterface):
 
         self.chunk_size = config.chunk_size
         self.config = config
-        self.dict: OrderedDict[CacheEngineKey, str] = OrderedDict()
+        self.dict: OrderedDict[CacheEngineKey,
+                               DiskCacheMetadata] = OrderedDict()
         self.path = config.local_device
 
         assert self.path is not None, ("Need to specify local path if when "
@@ -295,7 +297,7 @@ class LMCLocalDiskBackend(LMCBackendInterface):
         """
 
         self.update_lock.acquire()
-        path = self.dict[key]
+        path = self.dict[key].path
         self.dict.pop(key)
         self.update_lock.release()
 
@@ -336,7 +338,8 @@ class LMCLocalDiskBackend(LMCBackendInterface):
 
         save_file({"kv_chunk": kv_chunk}, path)
         self.update_lock.acquire()
-        self.dict[key] = path
+        self.dict[key] = DiskCacheMetadata(path,
+                                           self.evictor.get_size(kv_chunk))
         self.update_lock.release()
 
     def put(
@@ -381,7 +384,7 @@ class LMCLocalDiskBackend(LMCBackendInterface):
         if key not in self.dict:
             return None
 
-        path = self.dict[key]
+        path = self.dict[key].path
         self.evictor.update_on_get(key, self.dict)
 
         with safe_open(path, framework="pt",

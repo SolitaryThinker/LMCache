@@ -6,7 +6,7 @@ from typing import List, Tuple, Union
 import torch
 
 from lmcache.logging import init_logger
-from lmcache.utils import CacheEngineKey
+from lmcache.utils import CacheEngineKey, DiskCacheMetadata
 
 logger = init_logger(__name__)
 
@@ -67,11 +67,18 @@ class BaseEvictor(metaclass=abc.ABCMeta):
             num_elements = kv_obj.numel()
             element_size = kv_obj.element_size()
             size_in_bytes = num_elements * element_size
-        elif isinstance(kv_obj, bytes):
-            size_in_bytes = len(kv_obj)
-        else:
-            raise Exception("Encountered unknown kv data type!")
+            # Convert to gigabytes (GB)
+            size_in_gb = size_in_bytes / (1024**3)
 
-        # Convert to gigabytes (GB)
-        size_in_gb = size_in_bytes / (1024**3)
+        elif isinstance(kv_obj, bytearray):
+            size_in_bytes = len(kv_obj)
+            # Convert to gigabytes (GB)
+            size_in_gb = size_in_bytes / (1024**3)
+
+        elif isinstance(kv_obj, DiskCacheMetadata):
+            size_in_gb = kv_obj.size
+        else:
+            raise Exception(
+                f"Encountered unknown kv data type {type(kv_obj)}!")
+
         return size_in_gb

@@ -5,7 +5,7 @@ import torch
 
 from lmcache.logging import init_logger
 from lmcache.storage_backend.evictor.base_evictor import BaseEvictor, PutStatus
-from lmcache.utils import CacheEngineKey
+from lmcache.utils import CacheEngineKey, DiskCacheMetadata
 
 logger = init_logger(__name__)
 
@@ -16,10 +16,11 @@ class LRUEvictor(BaseEvictor):
     """
 
     def __init__(self, max_cache_size: float = 10.0):
+        # TODO(Jiayi): need to be configed
         # the storage size limit (in GB)
         self.MAX_CACHE_SIZE = max_cache_size
 
-        # TODO (Jiayi): need a way to avoid fragmentation
+        # TODO(Jiayi): need a way to avoid fragmentation
         # current storage size (in GB)
         self.current_cache_size = 0.0
 
@@ -67,4 +68,5 @@ class LRUEvictor(BaseEvictor):
 
         # update cache size
         self.current_cache_size += cache_size
+        logger.debug(f"Evicting {len(evict_keys)} chunks")
         return evict_keys, PutStatus.LEGAL

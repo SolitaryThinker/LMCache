@@ -1,4 +1,5 @@
 import os
+import threading
 from collections import OrderedDict
 from typing import List, Optional
 
@@ -7,7 +8,7 @@ from lmcache.server.server_storage_backend.abstract_backend import \
     LMSBackendInterface
 from lmcache.storage_backend.evictor import LRUEvictor
 from lmcache.storage_backend.evictor.base_evictor import PutStatus
-from lmcache.utils import _lmcache_nvtx_annotate
+from lmcache.utils import _lmcache_nvtx_annotate, DiskCacheMetadata
 
 logger = init_logger(__name__)
 
@@ -26,7 +27,9 @@ class LMSLocalBackend(LMSBackendInterface):
         """
         super().__init__()
 
-        self.dict: OrderedDict[str, bytes] = OrderedDict()
+        self.dict: OrderedDict[str, bytearray] = OrderedDict()
+
+        self.update_lock = threading.Lock()
 
         self.evictor = LRUEvictor()
 
@@ -65,7 +68,7 @@ class LMSLocalBackend(LMSBackendInterface):
     def put(
         self,
         key: str,
-        kv_chunk_bytes: bytes,
+        kv_chunk_bytes: bytearray,
         blocking: bool = True,
     ) -> None:
         """
@@ -74,7 +77,7 @@ class LMSLocalBackend(LMSBackendInterface):
         Input:
             key: the key of the token chunk, including prefix hash and format
             kv_chunk_bytes: the kv cache of the token chunk, in the format of 
-            bytes
+            bytearray
 
         Returns:
             None
@@ -85,12 +88,14 @@ class LMSLocalBackend(LMSBackendInterface):
         if not blocking:
             logger.warn("Non-blocking is not implemented for local backend")
 
+        self.update_lock.acquire()
         # Obtain keys to evict
         evict_keys, put_status = self.evictor.update_on_put(
             self.dict, kv_chunk_bytes)
 
         # Abort put if cache too big
         if put_status == PutStatus.ILLEGAL:
+            self.update_lock.release()
             return
 
         # Evict caches
@@ -99,12 +104,13 @@ class LMSLocalBackend(LMSBackendInterface):
 
         # Store new chunk
         self.dict[key] = kv_chunk_bytes
+        self.update_lock.release()
 
     @_lmcache_nvtx_annotate
     def get(
         self,
         key: str,
-    ) -> Optional[bytes]:
+    ) -> Optional[bytearray]:
         """
         Retrieve the KV cache chunk by the given key
 
@@ -115,12 +121,14 @@ class LMSLocalBackend(LMSBackendInterface):
             the kv cache of the token chunk, in the format of nested tuples
             None if the key is not found
         """
+        self.update_lock.acquire()
         kv_chunk = self.dict.get(key, None)
 
         # Update cache recency
         if kv_chunk is not None:
             self.evictor.update_on_get(key, self.dict)
 
+        self.update_lock.release()
         return kv_chunk
 
     def close(self):
@@ -149,7 +157,9 @@ class LMSLocalDiskBackend(LMSBackendInterface):
         self.path = path
         if not os.path.exists(self.path):
             os.makedirs(self.path)
-        self.dict: OrderedDict[str, str] = OrderedDict()
+        self.dict: OrderedDict[str, DiskCacheMetadata] = OrderedDict()
+
+        self.update_lock = threading.Lock()
 
         self.evictor = LRUEvictor()
 
@@ -198,14 +208,17 @@ class LMSLocalDiskBackend(LMSBackendInterface):
             key: the key of the token chunk, including prefix hash and format
 
         """
-        path = self.dict[key]
+        self.update_lock.acquire()
+        path = self.dict[key].path
         self.dict.pop(key)
+        self.update_lock.release()
+
         os.remove(path)
 
     def put(
         self,
         key: str,
-        kv_chunk_bytes: bytes,
+        kv_chunk_bytes: bytearray,
         blocking: bool = True,
     ) -> None:
         """
@@ -238,11 +251,15 @@ class LMSLocalDiskBackend(LMSBackendInterface):
         for evict_key in evict_keys:
             self.remove(evict_key)
 
-        self.dict[key] = path
         logger.info(f"Saving cache to {path}")
         # torch.save(kv_chunk_bytes, self._key_to_path(key))
         with open(self._key_to_path(key), "wb") as binary_file:
             binary_file.write(kv_chunk_bytes)
+
+        self.update_lock.acquire()
+        self.dict[key] = DiskCacheMetadata(
+            path, self.evictor.get_size(kv_chunk_bytes))
+        self.update_lock.release()
 
     @_lmcache_nvtx_annotate
     def get(
@@ -258,11 +275,18 @@ class LMSLocalDiskBackend(LMSBackendInterface):
             the kv cache of the token chunk, in the format of nested tuples
             None if the key is not found
         """
+        self.update_lock.acquire()
         if key not in self.dict:
+            self.update_lock.release()
             return None
 
+        path = self.dict[key].path
+        self.evictor.update_on_get(key, self.dict)
+
         with open(self._key_to_path(key), "rb") as binary_file:
-            return binary_file.read()
+            kv_chunk = binary_file.read()
+        self.update_lock.release()
+        return kv_chunk
 
         # return torch.load(self._key_to_path(key))
 
