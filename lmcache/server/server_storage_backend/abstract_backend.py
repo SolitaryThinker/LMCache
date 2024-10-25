@@ -63,20 +63,6 @@ class LMSBackendInterface(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def remove(
-        self,
-        key: str,
-    ) -> None:
-        """
-        Remove the KV cache chunk by the given key
-
-        Input:
-            key: the key of the token chunk, including prefix hash and format
-
-        """
-        raise NotImplementedError
-    
-    @abc.abstractmethod
     def list_keys(self, ) -> List[str]:
         """
         Retrieve the KV cache chunk by the given key
