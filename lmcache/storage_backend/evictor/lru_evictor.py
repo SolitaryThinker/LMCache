@@ -12,7 +12,7 @@ class LRUEvictor(BaseEvictor):
     LRU cache evictor
     """
     
-    def __init__(self, max_cache_size: float = 10):
+    def __init__(self, max_cache_size: float = 10.0):
         # the storage size limit (in GB)
         self.MAX_CACHE_SIZE = max_cache_size
         

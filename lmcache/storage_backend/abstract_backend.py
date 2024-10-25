@@ -61,6 +61,20 @@ class LMCBackendInterface(metaclass=abc.ABCMeta):
             None if the key is not found
         """
         raise NotImplementedError
+    
+    @abc.abstractmethod
+    def remove(
+        self,
+        key: CacheEngineKey,
+    ) -> None:
+        """
+        Remove the KV cache chunk by the given key
+
+        Input:
+            key: the key of the token chunk, including prefix hash and format
+
+        """
+        raise NotImplementedError
 
     def batched_put(
         self,

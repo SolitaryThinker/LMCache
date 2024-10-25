@@ -5,6 +5,8 @@ from collections import OrderedDict
 from lmcache.logging import init_logger
 from lmcache.server.server_storage_backend.abstract_backend import \
     LMSBackendInterface
+from lmcache.storage_backend.evictor import LRUEvictor
+from lmcache.storage_backend.evictor.base_evictor import PutStatus
 from lmcache.utils import _lmcache_nvtx_annotate
 
 logger = init_logger(__name__)
@@ -24,7 +26,9 @@ class LMSLocalBackend(LMSBackendInterface):
         """
         super().__init__()
 
-        self.dict = OrderedDict()
+        self.dict: OrderedDict[CacheEngineKey, bytes] = OrderedDict()
+        
+        self.evictor = LRUEvictor()
 
     def list_keys(self) -> List[str]:
 
@@ -44,6 +48,19 @@ class LMSLocalBackend(LMSBackendInterface):
             True if the cache engine contains the key, False otherwise
         """
         return key in self.dict
+    
+    def remove(
+        self, 
+        key: CacheEngineKey,
+    ) -> None:
+        """
+        Remove the KV cache chunk by the given key
+
+        Input:
+            key: the key of the token chunk, including prefix hash and format
+
+        """
+        self.dict.pop(key)
 
     def put(
         self,
@@ -67,6 +84,19 @@ class LMSLocalBackend(LMSBackendInterface):
         """
         if not blocking:
             logger.warn("Non-blocking is not implemented for local backend")
+        
+        # Obtain keys to evict
+        evict_keys, put_status = self.evictor.update_on_put(self.dict, kv_chunk_local)
+        
+        # Abort put if cache too big
+        if put_status == PutStatus.ILLEGAL:
+            return
+        
+        # Evict caches
+        for evict_key in evict_keys:
+            self.remove(evict_key)
+        
+        # Store new chunk
         self.dict[key] = kv_chunk_bytes
 
     @_lmcache_nvtx_annotate
@@ -84,7 +114,13 @@ class LMSLocalBackend(LMSBackendInterface):
             the kv cache of the token chunk, in the format of nested tuples
             None if the key is not found
         """
-        return self.dict.get(key, None)
+        kv_chunk =self.dict.get(key, None)
+        
+        # Update cache recency
+        if kv_chunk is not None:
+            self.evictor.update_on_get(key, self.dict)
+
+        return kv_chunk
 
     def close(self):
         pass
