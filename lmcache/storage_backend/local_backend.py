@@ -381,7 +381,9 @@ class LMCLocalDiskBackend(LMCBackendInterface):
             the kv cache of the token chunk, in the format of nested tuples
             None if the key is not found
         """
+        self.update_lock.acquire()
         if key not in self.dict:
+            self.update_lock.release()
             return None
 
         path = self.dict[key].path
@@ -389,8 +391,10 @@ class LMCLocalDiskBackend(LMCBackendInterface):
 
         with safe_open(path, framework="pt",
                        device=self.dst_device) as f:  # type: ignore
-            return f.get_tensor("kv_chunk")
-
+            kv_chunk = f.get_tensor("kv_chunk")
+        self.update_lock.release()
+        return kv_chunk
+    
     def close(self):
         if self.put_thread is not None and self.put_thread.is_alive():
             self.put_queue.put(LocalBackendEndSignal())
