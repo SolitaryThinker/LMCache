@@ -8,7 +8,7 @@ from lmcache.server.server_storage_backend.abstract_backend import \
     LMSBackendInterface
 from lmcache.storage_backend.evictor import LRUEvictor
 from lmcache.storage_backend.evictor.base_evictor import PutStatus
-from lmcache.utils import _lmcache_nvtx_annotate, DiskCacheMetadata
+from lmcache.utils import DiskCacheMetadata, _lmcache_nvtx_annotate
 
 logger = init_logger(__name__)
 

@@ -13,8 +13,8 @@ from lmcache.logging import init_logger
 from lmcache.storage_backend.abstract_backend import LMCBackendInterface
 from lmcache.storage_backend.evictor import LRUEvictor
 from lmcache.storage_backend.evictor.base_evictor import PutStatus
-from lmcache.utils import (CacheEngineKey, KVCache, 
-                           DiskCacheMetadata, _lmcache_nvtx_annotate)
+from lmcache.utils import (CacheEngineKey, DiskCacheMetadata, KVCache,
+                           _lmcache_nvtx_annotate)
 
 logger = init_logger(__name__)
 
