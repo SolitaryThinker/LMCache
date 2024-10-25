@@ -12,6 +12,7 @@ from lmcache.config import LMCacheEngineConfig, LMCacheEngineMetadata
 def dumb_metadata(fmt="vllm"):
     return LMCacheEngineMetadata("test_model", 3, 123, fmt, "half")
 
+
 def check_kv_cache_equal(left, right, num_tokens, fmt):
     """
     check if the first num_tokens of left and right kv cache are the same
@@ -45,6 +46,7 @@ def check_kv_cache_equal(left, right, num_tokens, fmt):
                 assert (left_v[:num_tokens, :, :] == right_v[:num_tokens, :, :]
                         ).all()
 
+
 def generate_kv_cache(num_tokens, fmt, device):
     ret = []
     num_layers = 32
@@ -65,13 +67,14 @@ def generate_kv_cache(num_tokens, fmt, device):
 def generate_tokens(num_tokens, device):
     return torch.randint(0, 10000, size=[num_tokens]).to(device)
 
+
 def get_tensor_size(tensor):
     num_elements = tensor.numel()
     element_size = tensor.element_size()
     size_in_bytes = num_elements * element_size
     size_in_gb = size_in_bytes / (1024**3)
     return size_in_gb
-    
+
 
 @pytest.mark.parametrize("dst_device", ["cuda:0"])
 @pytest.mark.parametrize("backend", ["cuda", "cpu", "file://local_disk/"])
@@ -93,33 +96,29 @@ def test_evict(backend, dst_device, autorelease):
     max_token = 513
     max_size = get_tensor_size(kv_cache_1[0][0]) * 32 * 2 / 256 * max_token
     engine.engine_.evictor.MAX_CACHE_SIZE = max_size
-    
-    
+
     # store kv_cache_1 and kv_cache_2
     engine.store(tokens_1, kv_cache_1)
     engine.store(tokens_2, kv_cache_2)
-    
+
     # retrieve (hit) kv_cache_1
     retrieved_cache, ret_mask = engine.retrieve(tokens_1)
     assert retrieved_cache[0][0].shape[0] == 256
-    check_kv_cache_equal(retrieved_cache, kv_cache_1, 
-                         num_tokens, fmt)
-    
+    check_kv_cache_equal(retrieved_cache, kv_cache_1, num_tokens, fmt)
+
     # store kv_cache_3 -> kv_cache_2 should be evicted
     engine.store(tokens_3, kv_cache_3)
-    
+
     # retrieve kv_cache_1, should be in cache
     retrieved_cache, ret_mask = engine.retrieve(tokens_1)
     assert retrieved_cache[0][0].shape[0] == 256
-    check_kv_cache_equal(retrieved_cache, kv_cache_1, 
-                         num_tokens, fmt)
-    
+    check_kv_cache_equal(retrieved_cache, kv_cache_1, num_tokens, fmt)
+
     # retrieve kv_cache_2, should be evicted
     retrieved_cache, ret_mask = engine.retrieve(tokens_2)
     assert retrieved_cache is ()
-    
+
     # retrieve kv_cache_3, should be in cache
     retrieved_cache, ret_mask = engine.retrieve(tokens_3)
     assert retrieved_cache[0][0].shape[0] == 256
-    check_kv_cache_equal(retrieved_cache, kv_cache_3, 
-                         num_tokens, fmt)
+    check_kv_cache_equal(retrieved_cache, kv_cache_3, num_tokens, fmt)

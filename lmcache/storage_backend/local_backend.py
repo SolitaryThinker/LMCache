@@ -394,7 +394,7 @@ class LMCLocalDiskBackend(LMCBackendInterface):
             kv_chunk = f.get_tensor("kv_chunk")
         self.update_lock.release()
         return kv_chunk
-    
+
     def close(self):
         if self.put_thread is not None and self.put_thread.is_alive():
             self.put_queue.put(LocalBackendEndSignal())
