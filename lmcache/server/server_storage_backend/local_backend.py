@@ -283,7 +283,7 @@ class LMSLocalDiskBackend(LMSBackendInterface):
         path = self.dict[key].path
         self.evictor.update_on_get(key, self.dict)
 
-        with open(self._key_to_path(key), "rb") as binary_file:
+        with open(path, "rb") as binary_file:
             kv_chunk = binary_file.read()
         self.update_lock.release()
         return kv_chunk

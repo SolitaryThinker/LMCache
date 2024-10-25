@@ -22,8 +22,8 @@ class LMSBackendInterface(metaclass=abc.ABCMeta):
 
         Args:
             key: the key of the token chunk, in the format of str
-            kv_chunk: the kv cache (bytearray) of the token chunk, in the format of 
-            a big tensor
+            kv_chunk: the kv cache (bytearray) of the token chunk, 
+            in the format of a big tensor
             blocking: whether to block the call before the operation is 
             completed
 

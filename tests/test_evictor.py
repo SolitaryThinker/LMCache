@@ -1,11 +1,7 @@
-import shlex
-import subprocess
-import time
-
 import pytest
 import torch
 
-from lmcache.cache_engine import LMCacheEngine, LMCacheEngineBuilder
+from lmcache.cache_engine import LMCacheEngine
 from lmcache.config import LMCacheEngineConfig, LMCacheEngineMetadata
 
 
@@ -116,7 +112,7 @@ def test_evict(backend, dst_device, autorelease):
 
     # retrieve kv_cache_2, should be evicted
     retrieved_cache, ret_mask = engine.retrieve(tokens_2)
-    assert retrieved_cache is ()
+    assert retrieved_cache == ()
 
     # retrieve kv_cache_3, should be in cache
     retrieved_cache, ret_mask = engine.retrieve(tokens_3)

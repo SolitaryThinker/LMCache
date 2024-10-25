@@ -5,7 +5,7 @@ import torch
 
 from lmcache.logging import init_logger
 from lmcache.storage_backend.evictor.base_evictor import BaseEvictor, PutStatus
-from lmcache.utils import CacheEngineKey, DiskCacheMetadata
+from lmcache.utils import CacheEngineKey
 
 logger = init_logger(__name__)
 
