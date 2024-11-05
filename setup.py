@@ -18,6 +18,7 @@ setup(
         "safetensors",
         "transformers",
         "torchac_cuda >= 0.2.5",
+        #"lmc_ops >= 0.0.0",
     ],
     classifiers=[
         # Trove classifiers
@@ -28,6 +29,9 @@ setup(
         "License :: OSI Approved :: Apache Software License",
     ],
     python_requires=">=3.10",
+    exclude_package_data={
+        '': ['csrc/*'],
+    },
     entry_points={
         "console_scripts": [
             # Add command-line scripts here

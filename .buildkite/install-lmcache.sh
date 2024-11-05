@@ -13,5 +13,9 @@ conda activate ${CONDA_ENV_NAME}
 
 set -xe 
 
+cd csrc
+pip install -e .
+cd ..
+
 pip install -e .
 
