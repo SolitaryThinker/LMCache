@@ -4,6 +4,14 @@
 #include <torch/torch.h>
 #include <iostream>
 
+// vllm-related kernels
+#include "vllm_csrc/cache.h"
+#include "vllm_csrc/cuda_utils.h"
+#include "vllm_csrc/ops.h"
+#include "vllm_csrc/core/registration.h"
+
+#include <torch/library.h>
+
 namespace py = pybind11;
 
 PYBIND11_MODULE(lmc_ops, m) {
@@ -12,4 +20,6 @@ PYBIND11_MODULE(lmc_ops, m) {
     m.def("decode_fast_new", &decode_cuda_new);
     m.def("decode_fast_prefsum", &decode_cuda_prefsum);
     m.def("calculate_cdf", &calculate_cdf);
+    
+    m.def("paged_attention_v2", &paged_attention_v2);
 }
