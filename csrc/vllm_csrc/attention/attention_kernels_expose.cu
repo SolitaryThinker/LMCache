@@ -91,6 +91,10 @@ __device__ void paged_attention_kernel(
     float* __restrict__ exp_sums,  // [num_seqs, num_heads, max_num_partitions]
     float* __restrict__ max_logits,  // [num_seqs, num_heads,
                                      // max_num_partitions]
+    // NOTE(Jiayi): starts
+    float* __restrict__ logits_store, // [num_heads, num_tokens]
+    //NOTE(Jiayi): ends
+
     scalar_t* __restrict__ out,  // [num_seqs, num_heads, max_num_partitions,
                                  // head_size]
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
@@ -108,6 +112,7 @@ __device__ void paged_attention_kernel(
     const float k_scale, const float v_scale, const int tp_rank,
     const int blocksparse_local_blocks, const int blocksparse_vert_stride,
     const int blocksparse_block_size, const int blocksparse_head_sliding_step) {
+
   const int seq_idx = blockIdx.y;
   const int partition_idx = blockIdx.z;
   const int max_num_partitions = gridDim.z;
@@ -188,6 +193,11 @@ __device__ void paged_attention_kernel(
   __syncthreads();  // TODO(naed90): possible speedup if this is replaced with a
                     // memory wall right before we use q_vecs
 
+  // NOTE(Jiayi): extern for declaring dynamically allocated shared memory 
+  // within kernels. If the shared memory size cannot be determined at compile
+  // time and depends on runtime parameters, you can declare it with extern 
+  // in a kernel, and then specify the size when launching the kernel.
+  
   // Memory planning.
   extern __shared__ char shared_mem[];
   // NOTE(woosuk): We use FP32 for the softmax logits for better accuracy.
@@ -205,6 +215,8 @@ __device__ void paged_attention_kernel(
   // Each thread group in a warp fetches a key from the block, and computes
   // dot product with the query.
   const int* block_table = block_tables + seq_idx * max_num_blocks_per_seq;
+
+  // NOTE(Jiayi): ignore block_sparse attentio for now
 
   // blocksparse specific vars
   int bs_block_offset;
@@ -224,6 +236,7 @@ __device__ void paged_attention_kernel(
                         1;
   }
 
+  
   for (int block_idx = start_block_idx + warp_idx; block_idx < end_block_idx;
        block_idx += NUM_WARPS) {
     // NOTE(woosuk): The block number is stored in int32. However, we cast it to
@@ -342,8 +355,21 @@ __device__ void paged_attention_kernel(
   const float inv_sum = __fdividef(1.f, exp_sum + 1e-6f);
   for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
     logits[i] *= inv_sum;
+
+    // NOTE(Jiayi): starts
+    // save logits from shared mem to HBM
+    logits_store[head_idx][i] = logits[i];
+    // NOTE(Jiayi): ends
+
   }
+
+  // NOTE(Jiayi): __synchthreads() ensures all threads in a
+  // thread block reaches the same point.
+  // can be optimized for writing to logits_store doesn't
+  // have to be synced
+
   __syncthreads();
+
 
   // If partitioning is enabled, store the max logit and exp_sum.
   if (USE_PARTITIONING && thread_idx == 0) {

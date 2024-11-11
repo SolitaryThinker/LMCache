@@ -21,5 +21,6 @@ PYBIND11_MODULE(lmc_ops, m) {
     m.def("decode_fast_prefsum", &decode_cuda_prefsum);
     m.def("calculate_cdf", &calculate_cdf);
     
+    m.def("paged_attention_v1", &paged_attention_v1);
     m.def("paged_attention_v2", &paged_attention_v2);
 }
