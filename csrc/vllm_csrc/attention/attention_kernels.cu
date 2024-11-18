@@ -342,6 +342,7 @@ __device__ void paged_attention_kernel(
   const float inv_sum = __fdividef(1.f, exp_sum + 1e-6f);
   for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
     logits[i] *= inv_sum;
+    //printf("Assign original (%d, %d) %f\n", head_idx*num_tokens + i, i, logits[i]);
   }
   __syncthreads();
 

@@ -7,7 +7,8 @@
 // vllm-related kernels
 #include "vllm_csrc/cache.h"
 #include "vllm_csrc/cuda_utils.h"
-#include "vllm_csrc/ops.h"
+// #include "vllm_csrc/ops.h"
+#include "vllm_csrc/ops_compact.h"
 #include "vllm_csrc/core/registration.h"
 
 #include <torch/library.h>
@@ -22,5 +23,6 @@ PYBIND11_MODULE(lmc_ops, m) {
     m.def("calculate_cdf", &calculate_cdf);
     
     m.def("paged_attention_v1", &paged_attention_v1);
-    m.def("paged_attention_v2", &paged_attention_v2);
+    m.def("paged_attention_compact_v1", &paged_attention_compact_v1);
+    // m.def("paged_attention_v2", &paged_attention_v2);
 }

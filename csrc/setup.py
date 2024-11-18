@@ -8,7 +8,7 @@ source_files = glob.glob(os.path.join('vllm_csrc/attention', '**', '*.cu'), recu
 source_files_filtered = []
 
 for s in source_files:
-    if "torch_bindings" not in s and "expose" not in s:
+    if "torch_bindings" not in s:# and "expose" not in s:
         source_files_filtered.append(s)
                        
 
