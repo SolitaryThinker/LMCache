@@ -93,6 +93,7 @@ __device__ void paged_attention_compact_kernel(
                                      // max_num_partitions]
     // NOTE(Jiayi): starts
     float* __restrict__ logits_store, // [num_heads, num_tokens]
+    const int logits_store_buffer_step,
     //NOTE(Jiayi): ends
 
     scalar_t* __restrict__ out,  // [num_seqs, num_heads, max_num_partitions,
@@ -533,7 +534,7 @@ __device__ void paged_attention_compact_kernel(
     // A potential improvement would be update the logits here
     // before writing it to the HBM
     // save logits from shared mem to HBM
-    logits_store[head_idx*num_tokens + i] = logits[i];
+    logits_store[head_idx*logits_store_buffer_step + i] = logits[i];
     //printf("Assign (%d, %d) %f\n", head_idx*num_tokens + i, i, logits[i]);
     // NOTE(Jiayi): ends
   }
@@ -546,6 +547,7 @@ template <typename scalar_t, typename cache_t, int HEAD_SIZE, int BLOCK_SIZE,
 __global__ void paged_attention_v1_compact_kernel(
     // NOTE(Jiayi): starts
     float* __restrict__ logits_store,  // [num_heads, num_toks]
+    const int logits_store_buffer_step,
     // NOTE(Jiayi): starts
     scalar_t* __restrict__ out,           // [num_seqs, num_heads, head_size]
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
@@ -565,7 +567,9 @@ __global__ void paged_attention_v1_compact_kernel(
     const int blocksparse_block_size, const int blocksparse_head_sliding_step) {
   paged_attention_compact_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,
                          KV_DTYPE, IS_BLOCK_SPARSE>(
-      /* exp_sums */ nullptr, /* max_logits */ nullptr, logits_store, out, q, k_cache,
+      /* exp_sums */ nullptr, /* max_logits */ nullptr, 
+      logits_store, logits_store_buffer_step,
+      out, q, k_cache,
       v_cache, num_kv_heads, scale, block_tables, seq_lens,
       max_num_blocks_per_seq, alibi_slopes, q_stride, kv_block_stride,
       kv_head_stride, k_scale, v_scale, tp_rank, blocksparse_local_blocks,
@@ -726,7 +730,8 @@ __global__ void paged_attention_v1_compact_kernel(
   vllm::paged_attention_v1_compact_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE,        \
                                   NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>   \
       <<<grid, block, shared_mem_size, stream>>>(                           \
-          logits_store_ptr, out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads, \
+          logits_store_ptr, logits_store_buffer_step,                       \
+          out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads, \
           scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,    \
           alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,      \
           k_scale, v_scale, tp_rank, blocksparse_local_blocks,              \
@@ -783,10 +788,13 @@ void paged_attention_v1_compact_launcher(
   int logits_size = padded_max_seq_len * sizeof(float);
   int outputs_size = (NUM_WARPS / 2) * head_size * sizeof(float);
 
+  // NOTE(Jiayi): starts
   // Python-side check in vllm.worker.worker._check_if_can_support_max_seq_len
   // Keep that in sync with the logic here!
   //int shared_mem_size = std::max(logits_size, outputs_size);
   int shared_mem_size = logits_size+outputs_size;
+  int logits_store_buffer_step = logits_store.size(1);
+  // NOTE(Jiayi): ends
 
   dim3 grid(num_heads, num_seqs, 1);
   dim3 block(NUM_THREADS);
