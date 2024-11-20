@@ -5,9 +5,9 @@ Clone the repositories:
 ```git clone -b compact git@github.com:LMCache/lmcache-vllm.git```
 
 Run ```pip install -e .``` under the following folders:
-```LMCache```
-```LMCache/csrc```
-```lmcache-vllm```
+```LMCache/```
+```LMCache/csrc/```
+```lmcache-vllm/```
 
 ### Run the example
 In ```LMCache/examples/compactor/long_gen.py```, run: 
