@@ -11,4 +11,4 @@ Run ```pip install -e .``` under the following folders:
 
 ### Run the example
 In ```LMCache/examples/compactor/long_gen.py```, run: 
-```LMC_COMPACTOR=True VLLM_ATTENTION_BACKEND=XFORMERS python long_gen.py```
+```LMC_COMPACTOR=True COMPACTOR_TYPE={Sink, H2O} VLLM_ATTENTION_BACKEND=XFORMERS python long_gen.py```
