@@ -1,7 +1,14 @@
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Callable
 from dataclasses import dataclass
 import torch
 
+
+
+@dataclass
+class CompactorMetadata:
+    num_gpu_blocks: int
+    rotary_emb: Callable[[torch.Tensor, torch.Tensor, torch.Tensor],
+                             Tuple[torch.Tensor, torch.Tensor]]
 
 # TODO(Jiayi): The following assumption needs to be more flexible
 # Current assumption: 

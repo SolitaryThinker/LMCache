@@ -78,11 +78,6 @@ class BaseSchedulerCompactor:
                                 
             seq.data.update_compacted_prompt_token_ids(compacted_prompt_token_ids)
             seq.data._num_computed_tokens = len(rep_compacted_indices)
-            
-            
-            # re-attch last token after block table allocation
-            # as vllm scheduler will append a slot to it
-            compacted_output_token_ids.append(seq.data._output_token_ids[-1])
             seq.data.update_compacted_output_token_ids(compacted_output_token_ids)
             
             # Allocate new block tables
@@ -96,6 +91,12 @@ class BaseSchedulerCompactor:
             block_manager.block_tables[seq.seq_id] = block_table
             
             compacted_block_table_dict = {seq.seq_id: block_table._block_ids}
+            
+            # re-attch last token after block table allocation
+            # as vllm scheduler will append a slot to it
+            compacted_output_token_ids.append(seq.data._output_token_ids[-1])
+            seq.data.update_compacted_output_token_ids(compacted_output_token_ids)
+            
             
             # Construct compacted slot mapping
             compacted_slot_mapping = []

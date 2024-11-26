@@ -11,6 +11,7 @@ from lmcache.compactor.base_local_compactor import BaseLocalCompactor
 from lmcache.compactor.utils import CompactorOutput
 from lmcache.logging import init_logger
 
+
 logger = init_logger(__name__)
 
 class H2OCompactor(BaseLocalCompactor):
@@ -18,11 +19,11 @@ class H2OCompactor(BaseLocalCompactor):
     H2O compactor
     """
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compactor_metadata):
+        super().__init__(compactor_metadata)
         
-        self.min_window_size = 512
-        self.max_window_size = 1024
+        self.min_window_size = 300
+        self.max_window_size = 512
     
     def decide_compact(
         self,
@@ -46,7 +47,17 @@ class H2OCompactor(BaseLocalCompactor):
             self.imp_scores[seq_id][layer_idx,:,:seq_len] += \
                 attn_weight[layer_idx][idx]
         
-
+    def adjust_positional_encoding(
+        self,
+        old_positions,
+        new_positions,
+        old_keys: torch.Tensor,
+        src_slot_mapping_layer,
+    ):
+        """
+        do nothing
+        """
+        return old_keys
     
     def compute_indices(
         self,

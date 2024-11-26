@@ -3,12 +3,12 @@ from typing import Dict, Optional
 from lmcache.compactor.h2o_local_compactor import H2OCompactor
 from lmcache.compactor.sink_local_compactor import SinkCompactor
 from lmcache.compactor.base_local_compactor import BaseLocalCompactor
-from lmcache.compactor.utils import CompactorInput, CompactorOutput
+from lmcache.compactor.utils import CompactorInput, CompactorOutput, CompactorMetadata
 from lmcache.compactor.base_scheduler_compactor import BaseSchedulerCompactor
 
 __all__ = ["H2OCompactor", "SinkCompactor"
            "BaseSchedulerCompactor",
-           "CompactorInput", "CompactorOutput"]
+           "CompactorInput", "CompactorOutput","CompactorMetadata"]
 
 class LMCacheCompactorBuilder:
     _instances: Dict[str, BaseLocalCompactor] = {}
@@ -17,7 +17,8 @@ class LMCacheCompactorBuilder:
     def get_or_create(
         cls,
         instance_id: str,
-        compactor_type = "H2O"
+        compactor_type = "H2O",
+        compactor_metadata = None,
     ) -> BaseLocalCompactor:
         """
         Builds a new LMCacheCompactor instance if it doesn't already exist for the
@@ -28,9 +29,9 @@ class LMCacheCompactorBuilder:
         """
         if instance_id not in cls._instances:
             if compactor_type == "H2O":
-                compactor = H2OCompactor()
+                compactor = H2OCompactor(compactor_metadata)
             elif compactor_type == "Sink":
-                compactor = SinkCompactor()
+                compactor = SinkCompactor(compactor_metadata)
             else:
                 raise Exception(f"Compactor type {compactor_type} not supported")
             cls._instances[instance_id] = compactor

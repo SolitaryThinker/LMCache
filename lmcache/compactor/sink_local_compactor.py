@@ -17,17 +17,19 @@ class SinkCompactor(BaseLocalCompactor):
     SteamingLLM-like compactor
     Always retain the first 4 tokens (attention sinks)
     """
-    def __init__(self,):
-        super().__init__()
+    def __init__(self, compactor_metadata):
+        super().__init__(compactor_metadata)
         
-        self.min_window_size = 512
-        self.max_window_size = 1024
+        self.min_window_size = 300
+        self.max_window_size = 512
         self.num_sink = 4
+        
+        
     
     def decide_compact(
         self,
         seq_len) -> bool:
-        if seq_len > self.max_window_size:
+        if seq_len >= self.max_window_size:
             return True
         return False
     
@@ -41,8 +43,39 @@ class SinkCompactor(BaseLocalCompactor):
         Do nothing
         """
         pass
+    
+    def adjust_positional_encoding(
+        self,
+        old_positions,
+        new_positions,
+        old_keys: torch.Tensor,
+        src_slot_mapping_layer,
+    ):
+        """
+        reverse and recover the positional encoding
+        """
         
+        num_tok = len(src_slot_mapping_layer)
+        reshaped_keys = old_keys[src_slot_mapping_layer].reshape(num_tok, -1)
+        dumb_q = torch.zeros(reshaped_keys.shape,
+                             device=old_keys.device,
+                             dtype=old_keys.dtype)
         
+        dumb_q, no_pos_keys = self.reverse_rotary_emb(
+            torch.tensor(old_positions).to(device=old_keys.device,
+                             dtype=torch.long),
+            dumb_q,
+            old_keys)
+        
+        dumb_q, new_keys = self.rotary_emb(
+            torch.tensor(new_positions).to(device=old_keys.device,
+                             dtype=torch.long),
+            dumb_q,
+            no_pos_keys)
+        
+        # should return old_keys as rotary_emb is inplace operation
+        return old_keys
+    
     
     def compute_indices(self, seq_id, seq_len):
         """

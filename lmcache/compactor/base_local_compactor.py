@@ -9,6 +9,7 @@ from vllm import _custom_ops as ops
 
 from lmcache.compactor.utils import CompactorOutput
 from lmcache.logging import init_logger
+from lmcache_vllm.utils.positional_encoding import get_reverse_rope
 
 logger = init_logger(__name__)
 
@@ -19,19 +20,19 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
     Interface for local compactor
     """
     
-    def __init__(self):
+    def __init__(self, compactor_metadata):
         # NOTE(Jiayi): keeping src_slot_mappings in local compactor
         # minimizes communication overhead between scheduler and worker
          
         #{seq_idx: num_layers * slot_mapping}
         self.src_slot_mappings = {}
+        # track old and new positions for position recovery
+        self.positions_tracker = {}
         
         # tensor: num_layer, num_head, window_limit
         #{seq_idx: imp_scores}
         # imp_scores should be initialized as the seq_id enters
         self.imp_scores = {}
-        
-        #num_layer * Tensor([num_heads, num_toks])
         
         
         # TODO: remove this hardcode
@@ -41,19 +42,37 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         self.head_size = 128
         self.device = "cuda"
         self.vllm_block_size = 16
+        
+        # TODO(Jiayi): None-rope models might be configured differently
+        self.rotary_emb = compactor_metadata.rotary_emb
+        self.reverse_rotary_emb = get_reverse_rope(
+            self.head_size,
+            rotary_dim=self.head_size,
+            max_position=self.rotary_emb.max_position_embeddings,
+            base=self.rotary_emb.base,
+            is_neox_style=self.rotary_emb.is_neox_style,
+        )
 
+        
+        # TODO: better done in initialization phase
+        # The following memory allocation may explode the memory if
+        # `gpu_memory_utilization` is set too high in vllm
+        # TODO: Also, please make it more flexible
+        max_num_tokens = 144400
+        
+        
         # The logits buffer need to be preallocated
         # to be compatible with cuda graph
-        # TODO: remove hard code `81920`
         # TODO: queue looks weird here. This queue exists only because
         # layer_idx is not available in attention module
         self.logits_buffer_queue = queue.Queue()
         for i in range(self.num_layers):
             self.logits_buffer_queue.put(
-                torch.empty((self.num_heads, 81920),
+                torch.empty((self.num_heads, max_num_tokens),
                         device=self.device,
                         dtype=torch.float32)
                 )
+    
     
     @abc.abstractmethod
     def update_imp_scores(
@@ -125,6 +144,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         dst_slot_mappings):
         """
         """
+        
         attn_layers = model_input_subset.attn_layers
         start_layer = model_input_subset.start_layer
         end_layer = model_input_subset.end_layer
@@ -152,6 +172,13 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 key_cache_temp = key_cache.permute(0,3,1,2,4)
                 key_cache_temp = key_cache_temp.reshape(
                                 -1, self.num_kv_heads, self.head_size)
+                
+                key_cache_temp = self.adjust_positional_encoding(
+                    self.positions_tracker[seq_id][0][layer_idx],
+                    self.positions_tracker[seq_id][1][layer_idx],
+                    key_cache_temp,
+                    src_slot_mapping_layer,
+                )
                 
                 value_cache_temp = value_cache.permute(0,3,1,2)
                 value_cache_temp = value_cache_temp.reshape(
@@ -182,6 +209,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             
             # pop src_slot_mapping to reduce memory usage
             self.src_slot_mappings.pop(seq_id, None)
+            self.positions_tracker.pop(seq_id, None)
     
     def clean_request_states(
         self,
@@ -191,6 +219,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             return
         for end_seq_id in end_seq_ids:
             self.src_slot_mappings.pop(end_seq_id, None)
+            self.positions_tracker.pop(end_seq_id, None)
             self.imp_scores.pop(end_seq_id, None)
         
     
@@ -266,8 +295,27 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 compute_slot_mapping(False, slot_mapping, seq_id, seq_len, 
                     0, 0, self.vllm_block_size, seq_group_metadata.block_tables)
                 
+                # FIXME(Jiayi): Please move this part inside the real compactor
+                if seq_id not in self.positions_tracker:
+                    old_positions = [[i for i in range(seq_len)] for j in range(len(compacted_indices))]
+                else:
+                    old_positions = self.positions_tracker[seq_id][1]
+                
+                updated_old_positions = []
+                new_positions = []
+                for layer_idx, compacted_indices_layer in enumerate(compacted_indices):
+                    updated_old_positions.append(
+                        [old_positions[layer_idx][i] for i in compacted_indices_layer])
+                    
+                    new_positions.append(
+                        [i for i in range(len(compacted_indices_layer))])
+                
+                self.positions_tracker[seq_id] = (updated_old_positions, new_positions)
+                
+                
                 # FIXME(Jiayi): Please use tensor operations if possible
                 compacted_slot_mapping =[]
+                
                 for compacted_indices_layer in compacted_indices:
                     compacted_slot_mapping.append(
                         [slot_mapping[i] for i in compacted_indices_layer])
