@@ -71,6 +71,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
     def compute_indices(
         self,
         seq_id,
+        seq_len,
     ):
         """
         compute indices for schedulers
@@ -78,23 +79,44 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         """
         raise NotImplementedError
     
+    @abc.abstractmethod
+    def decide_compact(
+        self,
+        seq_len,
+    ) -> bool:
+        """
+        Decide whether to perform compaction
+        """
+        raise NotImplementedError
         
     def allocate_imp_scores(
         self,
         model_input,
     ):
         seq_group_metadata_list = model_input.seq_group_metadata_list
+        idx = 0
+        seq_lens = model_input.attn_metadata.seq_lens
         for seq_group_metadata in seq_group_metadata_list:
             request_id = seq_group_metadata.request_id
             seq_ids = model_input.request_ids_to_seq_ids[request_id]
             for seq_id in seq_ids:
                 if seq_id in self.imp_scores:
+                    idx += 1
                     continue
+                
+                # FIXME(Jiayi): this incurs memory overhead if the input is too long
+                # FIXME(Jiayi): this part requires fixing
+                buffer_size = max((seq_lens[idx]//self.max_window_size+1)*\
+                    self.max_window_size,
+                    self.max_window_size)
+                
                 imp_scores_temp = torch.zeros(
-                    (self.num_layers, self.num_heads, self.max_window_size),
+                    (self.num_layers, self.num_heads, buffer_size),
                     device=self.device,
                     dtype=torch.float32)
                 self.imp_scores[seq_id] = imp_scores_temp
+                
+                idx += 1
 
     def compact_memory(
         self,
@@ -228,12 +250,15 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 seq_len = seq_data.get_len()
                 
-                # FIXME(Jiayi): fix the logic here
-                if seq_len < self.max_window_size:
+                # Decide whether to perform compaction
+                if not self.decide_compact(seq_len):
+                    idx += 1
                     continue
                 
-                logger.debug(f"[Compactor] h2o_local_compactor taking effect! seq_id: {seq_id}")
-                compacted_indices = self.compute_indices(seq_id)
+                compacted_indices = self.compute_indices(seq_id, seq_len)
+                logger.debug(f"[Compactor] local_compactor taking effect! seq_id: {seq_id}")
+                logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
+                             f"-> {len(compacted_indices[0])}")
                 compacted_indices_dict[seq_id] = compacted_indices
 
                 # update src_slot_mappings
@@ -241,12 +266,14 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 compute_slot_mapping(False, slot_mapping, seq_id, seq_len, 
                     0, 0, self.vllm_block_size, seq_group_metadata.block_tables)
                 
+                # FIXME(Jiayi): Please use tensor operations if possible
                 compacted_slot_mapping =[]
                 for compacted_indices_layer in compacted_indices:
                     compacted_slot_mapping.append(
                         [slot_mapping[i] for i in compacted_indices_layer])
                 
                 self.src_slot_mappings[seq_id] = compacted_slot_mapping
+                idx += 1
                 
         compactor_output = CompactorOutput(
             compacted_indices_dict=compacted_indices_dict,)

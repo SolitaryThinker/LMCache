@@ -36,7 +36,6 @@ class BaseSchedulerCompactor:
             if seq_id not in compacted_indices_dict:
                 continue
             
-            logger.debug(f"[Compactor] base_scheduler_compactor taking effect! seq_id: {seq_id}")
             
             # Get block tables
             # NOTE: block table object is under vllm.block
@@ -67,7 +66,7 @@ class BaseSchedulerCompactor:
             
             # NOTE(Jiayi): we only use the first layer of the compacted indices
             # TODO(Jiayi): please check whether the dropped tokens are included
-            # in the fial output
+            # in the final output
             rep_layer_idx = 0
             rep_compacted_indices = compacted_indices[rep_layer_idx]
             for i in rep_compacted_indices:
@@ -81,17 +80,17 @@ class BaseSchedulerCompactor:
             seq.data._num_computed_tokens = len(rep_compacted_indices)
             
             
+            # re-attch last token after block table allocation
+            # as vllm scheduler will append a slot to it
+            compacted_output_token_ids.append(seq.data._output_token_ids[-1])
+            seq.data.update_compacted_output_token_ids(compacted_output_token_ids)
+            
             # Allocate new block tables
             is_encoder_decoder = seq_group.is_encoder_decoder()
             block_table: BlockTable = \
                 block_manager._allocate_sequence(seq,
                                             seq_group.num_seqs(),
                                             is_encoder_decoder)
-            
-            # re-attch last token after block table allocation
-            # as vllm scheduler will append a slot to it
-            compacted_output_token_ids.append(seq.data._output_token_ids[-1])
-            seq.data.update_compacted_output_token_ids(compacted_output_token_ids)
             
             # Update block table
             block_manager.block_tables[seq.seq_id] = block_table
@@ -109,4 +108,6 @@ class BaseSchedulerCompactor:
             
             # Update dst_slot_mapping
             dst_slot_mappings[seq_id] = compacted_slot_mapping
-        
+            
+            logger.debug(f"[Compactor] base_scheduler_compactor taking effect! seq_id: {seq_id}")
+            logger.debug(f"[Compactor] compacted_slot_mapping len: {len(compacted_slot_mapping)}")

@@ -20,9 +20,16 @@ class SinkCompactor(BaseLocalCompactor):
     def __init__(self,):
         super().__init__()
         
-        self.min_window_size = 350
-        self.max_window_size = 512
+        self.min_window_size = 512
+        self.max_window_size = 1024
         self.num_sink = 4
+    
+    def decide_compact(
+        self,
+        seq_len) -> bool:
+        if seq_len > self.max_window_size:
+            return True
+        return False
     
     def update_imp_scores(
         self,
@@ -37,15 +44,15 @@ class SinkCompactor(BaseLocalCompactor):
         
         
     
-    def compute_indices(self, seq_id):
+    def compute_indices(self, seq_id, seq_len):
         """
         
         """
         num_last = self.min_window_size - self.num_sink
         
         sink_indices = [i for i in range(self.num_sink)]
-        last_indices = [i for i in range(self.max_window_size - num_last,
-                                         self.max_window_size)]
+        last_indices = [i for i in range(seq_len - num_last,
+                                         seq_len)]
         compacted_indices = [sink_indices + last_indices \
             for i in range(self.num_layers)]
         

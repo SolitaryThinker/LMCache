@@ -21,10 +21,16 @@ class H2OCompactor(BaseLocalCompactor):
     def __init__(self):
         super().__init__()
         
-        self.min_window_size = 400
-        self.max_window_size = 512
-            
-        
+        self.min_window_size = 512
+        self.max_window_size = 1024
+    
+    def decide_compact(
+        self,
+        seq_len) -> bool:
+        if seq_len % self.max_window_size == 0:
+            return True
+        return False        
+    
     def update_imp_scores(
         self,
         seq_id,
@@ -45,6 +51,7 @@ class H2OCompactor(BaseLocalCompactor):
     def compute_indices(
         self,
         seq_id,
+        seq_len,
     ):
         """
         compute indices for schedulers
