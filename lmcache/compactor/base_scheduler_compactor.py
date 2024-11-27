@@ -61,8 +61,10 @@ class BaseSchedulerCompactor:
             compacted_prompt_token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE, [])
             compacted_output_token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE, [])
             
-            
-            prompt_len = len(seq._prompt_token_ids)
+            if len(seq.data.compacted_prompt_token_ids) == 0:
+                prompt_len = len(seq._prompt_token_ids)
+            else:
+                prompt_len = len(seq.data.compacted_prompt_token_ids)
             
             # NOTE(Jiayi): we only use the first layer of the compacted indices
             # TODO(Jiayi): please check whether the dropped tokens are included
@@ -72,21 +74,37 @@ class BaseSchedulerCompactor:
             for i in rep_compacted_indices:
                 # TODO(Jiayi): compaction in prompt (prefill) is not supported now
                 if i < prompt_len:
-                    compacted_prompt_token_ids.append(seq.data._prompt_token_ids[i])
+                    if len(seq.data.compacted_prompt_token_ids) == 0:
+                        compacted_prompt_token_ids.append(
+                            seq.data._prompt_token_ids[i])
+                    else:
+                        compacted_prompt_token_ids.append(
+                            seq.data.compacted_prompt_token_ids[i])
                 else:
-                    compacted_output_token_ids.append(seq.data._output_token_ids[i-prompt_len])
-                                
+                    if len(seq.data.compacted_output_token_ids) == 0:
+                        compacted_output_token_ids.append(
+                            seq.data._output_token_ids[i-prompt_len])
+                    else:
+                        compacted_output_token_ids.append(
+                            seq.data.compacted_output_token_ids[i-prompt_len])
+                                   
             seq.data.update_compacted_prompt_token_ids(compacted_prompt_token_ids)
             seq.data._num_computed_tokens = len(rep_compacted_indices)
             seq.data.update_compacted_output_token_ids(compacted_output_token_ids)
             
             # Allocate new block tables
             is_encoder_decoder = seq_group.is_encoder_decoder()
+            # NOTE: `self._get_seq_num_required_blocks(seq)` is called
+            # Then, `seq.n_blocks`
+            # Then, `self.get_len() in Sequence`
+            
             block_table: BlockTable = \
                 block_manager._allocate_sequence(seq,
                                             seq_group.num_seqs(),
                                             is_encoder_decoder)
-            
+            if len(block_table) == 623:
+                import pdb
+                pdb.set_trace()
             # Update block table
             block_manager.block_tables[seq.seq_id] = block_table
             

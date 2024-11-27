@@ -137,12 +137,15 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 
                 idx += 1
 
+    # FIXME(Jiayi): Extremely slow now
+    # Please benchmark this function 
     def compact_memory(
         self,
         model_input_subset,
         kv_caches,
         dst_slot_mappings):
         """
+        Make real memory movement here
         """
         
         attn_layers = model_input_subset.attn_layers
@@ -162,7 +165,6 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             # or at least into a separate function
             for layer_idx, src_slot_mapping_layer in \
                 enumerate(self.src_slot_mappings[seq_id]):
-                
                 kv_cache = kv_caches[layer_idx]
                 attn_layer = attn_layers[layer_idx]
                 key_cache, value_cache = PagedAttention.split_kv_cache(
@@ -210,7 +212,8 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             # pop src_slot_mapping to reduce memory usage
             self.src_slot_mappings.pop(seq_id, None)
             self.positions_tracker.pop(seq_id, None)
-    
+
+        #print("done")
     def clean_request_states(
         self,
         end_seq_ids,

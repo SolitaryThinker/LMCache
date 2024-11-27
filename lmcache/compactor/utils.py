@@ -27,6 +27,10 @@ class CompactorInput:
     # {seq_idx: List[int]}
     dst_slot_mappings: Dict[int, List[int]]
     end_seq_ids: List[int]
+    
+    def reset(self):
+        self.dst_slot_mappings = {}
+        self.end_seq_ids = []
 
 
 # NOTE(Jiayi): a potential optimization is to only send the
