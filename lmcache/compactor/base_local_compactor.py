@@ -10,6 +10,7 @@ from vllm import _custom_ops as ops
 from lmcache.compactor.utils import CompactorOutput
 from lmcache.logging import init_logger
 from lmcache_vllm.utils.positional_encoding import get_reverse_rope
+from lmcache_vllm.utils.rotary_embedding import get_rope
 
 logger = init_logger(__name__)
 
@@ -52,7 +53,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             base=self.rotary_emb.base,
             is_neox_style=self.rotary_emb.is_neox_style,
         )
-
+        
         
         # TODO: better done in initialization phase
         # The following memory allocation may explode the memory if
@@ -152,6 +153,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         start_layer = model_input_subset.start_layer
         end_layer = model_input_subset.end_layer
         
+        #start_event = torch.cuda.Event(enable_timing=True)
+        #end_event = torch.cuda.Event(enable_timing=True)
+        #start_event.record()
+        
         # TODO(Jiayi): intra-batch memory movement should be batched 
         for seq_id, dst_slot_mapping in dst_slot_mappings.items():
             dst_slot_mapping = torch.tensor(dst_slot_mapping, 
@@ -175,12 +180,20 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 key_cache_temp = key_cache_temp.reshape(
                                 -1, self.num_kv_heads, self.head_size)
                 
-                key_cache_temp = self.adjust_positional_encoding(
+
+                #start_event = torch.cuda.Event(enable_timing=True)
+                #end_event = torch.cuda.Event(enable_timing=True)
+                #start_event.record()
+                self.adjust_positional_encoding(
                     self.positions_tracker[seq_id][0][layer_idx],
                     self.positions_tracker[seq_id][1][layer_idx],
                     key_cache_temp,
                     src_slot_mapping_layer,
                 )
+                #end_event.record()
+                #torch.cuda.synchronize()
+                #run_time = start_event.elapsed_time(end_event)
+                #print(f"pos encoding time: {run_time}")
                 
                 value_cache_temp = value_cache.permute(0,3,1,2)
                 value_cache_temp = value_cache_temp.reshape(
@@ -197,6 +210,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 if len(misaligned_indices) == 0:
                     continue
 
+                #start_event = torch.cuda.Event(enable_timing=True)
+                #end_event = torch.cuda.Event(enable_timing=True)
+                #start_event.record()
+                
                 # reshape_and_cache_flash is only used for flash attention
                 ops.reshape_and_cache(
                     key_cache_temp[src_slot_mapping_layer[misaligned_indices]],
@@ -208,11 +225,20 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                     attn_layer.attn._k_scale,
                     attn_layer.attn._v_scale,
                 )
+                #end_event.record()
+                #torch.cuda.synchronize()
+                #run_time = start_event.elapsed_time(end_event)
+                #print(f"mem movement time: {run_time}")
             
             # pop src_slot_mapping to reduce memory usage
             self.src_slot_mappings.pop(seq_id, None)
             self.positions_tracker.pop(seq_id, None)
 
+        #end_event.record()
+        #torch.cuda.synchronize()
+        #run_time = start_event.elapsed_time(end_event)
+        #print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
+        
         #print("done")
     def clean_request_states(
         self,
@@ -266,6 +292,11 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 seq_lens, dim=1)
             chunked_attetnion_weights.append(chunked_buffer)
             self.logits_buffer_queue.put(buffer)
+        
+        
+        #start_event = torch.cuda.Event(enable_timing=True)
+        #end_event = torch.cuda.Event(enable_timing=True)
+        #start_event.record()
         
         compacted_indices_dict = {}
         idx = 0
@@ -328,6 +359,12 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 
         compactor_output = CompactorOutput(
             compacted_indices_dict=compacted_indices_dict,)
+        
+        #end_event.record()
+        #torch.cuda.synchronize()
+        #run_time = start_event.elapsed_time(end_event)
+        #print(f"post model update time, {len(seq_group_metadata_list)} seqs: {run_time}")
+        
         return compactor_output
     
 

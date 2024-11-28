@@ -24,5 +24,6 @@ PYBIND11_MODULE(lmc_ops, m) {
     
     m.def("paged_attention_v1", &paged_attention_v1);
     m.def("paged_attention_compact_v1", &paged_attention_compact_v1);
+    m.def("rotary_embedding_k", &rotary_embedding_k);
     // m.def("paged_attention_v2", &paged_attention_v2);
 }

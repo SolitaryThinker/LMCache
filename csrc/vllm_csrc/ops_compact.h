@@ -16,6 +16,11 @@ void paged_attention_compact_v1(
     const int64_t tp_rank, const int64_t blocksparse_local_blocks,
     const int64_t blocksparse_vert_stride, const int64_t blocksparse_block_size,
     const int64_t blocksparse_head_sliding_step);
+
+void rotary_embedding_k(
+    torch::Tensor& positions,
+    torch::Tensor& key, int64_t head_size,
+    torch::Tensor& cos_sin_cache, bool is_neox);
 // NOTE(Jiayi): ends
 
 void paged_attention_v1(

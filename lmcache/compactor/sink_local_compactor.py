@@ -57,23 +57,19 @@ class SinkCompactor(BaseLocalCompactor):
         
         num_tok = len(src_slot_mapping_layer)
         reshaped_keys = old_keys[src_slot_mapping_layer].reshape(num_tok, -1)
-        dumb_q = torch.zeros(reshaped_keys.shape,
-                             device=old_keys.device,
-                             dtype=old_keys.dtype)
         
-        dumb_q, no_pos_keys = self.reverse_rotary_emb(
+        no_pos_keys = self.reverse_rotary_emb(
             torch.tensor(old_positions).to(device=old_keys.device,
                              dtype=torch.long),
-            dumb_q,
-            old_keys)
+            reshaped_keys)
         
-        dumb_q, new_keys = self.rotary_emb(
+        new_keys = self.reverse_rotary_emb(
             torch.tensor(new_positions).to(device=old_keys.device,
                              dtype=torch.long),
-            dumb_q,
-            no_pos_keys)
-        
-        # should return old_keys as rotary_emb is inplace operation
+            no_pos_keys,
+            is_reverse=False)
+        new_keys = new_keys.reshape(num_tok, self.num_kv_heads, self.head_size)
+        old_keys[src_slot_mapping_layer] = new_keys
         return old_keys
     
     

@@ -856,6 +856,9 @@ void paged_attention_v1_compact_launcher(
 // 1, 2, 4, 64, 128, 256.
 #define CALL_V1_COMPACT_LAUNCHER_BLOCK_SIZE(T, CACHE_T, KV_DTYPE)         \
   switch (block_size) {                                           \
+    case 1:                                                       \
+      CALL_V1_COMPACT_LAUNCHER_SPARSITY(T, CACHE_T, 1, KV_DTYPE);         \
+      break;                                                      \
     case 8:                                                       \
       CALL_V1_COMPACT_LAUNCHER_SPARSITY(T, CACHE_T, 8, KV_DTYPE);         \
       break;                                                      \

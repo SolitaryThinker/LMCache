@@ -30,6 +30,11 @@ class BaseSchedulerCompactor:
         Update dst_slot_mapping
         
         """
+        
+        #start_event = torch.cuda.Event(enable_timing=True)
+        #end_event = torch.cuda.Event(enable_timing=True)
+        #start_event.record()
+        
         for seq in seq_group.get_seqs():
             seq_id = seq.seq_id
             # Check whether the current seq_id needs to be compacted
@@ -130,3 +135,8 @@ class BaseSchedulerCompactor:
             
             logger.debug(f"[Compactor] base_scheduler_compactor taking effect! seq_id: {seq_id}")
             logger.debug(f"[Compactor] compacted_slot_mapping len: {len(compacted_slot_mapping)}")
+            
+        #end_event.record()
+        #torch.cuda.synchronize()
+        #run_time = start_event.elapsed_time(end_event)
+        #print(f"compact blocks, {len(seq_group.get_seqs())} seqs: {run_time}")
