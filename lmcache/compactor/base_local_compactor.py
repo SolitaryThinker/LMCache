@@ -139,7 +139,11 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 idx += 1
 
     # FIXME(Jiayi): Extremely slow now
-    # Please benchmark this function 
+    # Improved a lot, requires futher optimization
+    # 1. Let pos encoding be `inpace`, operating on paged memory directly
+    # 2. Let compaction be `inplace`
+    # 3. batching sequence
+    # 4. batching head 
     def compact_memory(
         self,
         model_input_subset,
@@ -172,32 +176,55 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 enumerate(self.src_slot_mappings[seq_id]):
                 kv_cache = kv_caches[layer_idx]
                 attn_layer = attn_layers[layer_idx]
+                
+                # start_event = torch.cuda.Event(enable_timing=True)
+                # end_event = torch.cuda.Event(enable_timing=True)
+                # start_event.record()
                 key_cache, value_cache = PagedAttention.split_kv_cache(
                         kv_cache, self.num_kv_heads, self.head_size)
+                # end_event.record()
+                # torch.cuda.synchronize()
+                # run_time = start_event.elapsed_time(end_event)
+                # print(f"kv split time: {run_time}")
                 
-                
+                #import pdb
+                #pdb.set_trace()
+                # start_event = torch.cuda.Event(enable_timing=True)
+                # end_event = torch.cuda.Event(enable_timing=True)
+                # start_event.record()
                 key_cache_temp = key_cache.permute(0,3,1,2,4)
                 key_cache_temp = key_cache_temp.reshape(
                                 -1, self.num_kv_heads, self.head_size)
-                
+                key_cache_temp = key_cache_temp[src_slot_mapping_layer]
+                # end_event.record()
+                # torch.cuda.synchronize()
+                # run_time = start_event.elapsed_time(end_event)
+                # print(f"key perm reshape time: {run_time}")
 
-                #start_event = torch.cuda.Event(enable_timing=True)
-                #end_event = torch.cuda.Event(enable_timing=True)
-                #start_event.record()
+                # start_event = torch.cuda.Event(enable_timing=True)
+                # end_event = torch.cuda.Event(enable_timing=True)
+                # start_event.record()
                 self.adjust_positional_encoding(
                     self.positions_tracker[seq_id][0][layer_idx],
                     self.positions_tracker[seq_id][1][layer_idx],
                     key_cache_temp,
-                    src_slot_mapping_layer,
                 )
-                #end_event.record()
-                #torch.cuda.synchronize()
-                #run_time = start_event.elapsed_time(end_event)
-                #print(f"pos encoding time: {run_time}")
+                # end_event.record()
+                # torch.cuda.synchronize()
+                # run_time = start_event.elapsed_time(end_event)
+                # print(f"pos encoding time: {run_time}")
                 
+                # start_event = torch.cuda.Event(enable_timing=True)
+                # end_event = torch.cuda.Event(enable_timing=True)
+                # start_event.record()
                 value_cache_temp = value_cache.permute(0,3,1,2)
                 value_cache_temp = value_cache_temp.reshape(
                                 -1, self.num_kv_heads, self.head_size)
+                value_cache_temp = value_cache_temp[src_slot_mapping_layer]
+                # end_event.record()
+                # torch.cuda.synchronize()
+                # run_time = start_event.elapsed_time(end_event)
+                # print(f"value perm reshape time: {run_time}")
                 
                 src_slot_mapping_layer = torch.tensor(
                     src_slot_mapping_layer, 
@@ -210,14 +237,14 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 if len(misaligned_indices) == 0:
                     continue
 
-                #start_event = torch.cuda.Event(enable_timing=True)
-                #end_event = torch.cuda.Event(enable_timing=True)
-                #start_event.record()
+                start_event = torch.cuda.Event(enable_timing=True)
+                end_event = torch.cuda.Event(enable_timing=True)
+                start_event.record()
                 
                 # reshape_and_cache_flash is only used for flash attention
                 ops.reshape_and_cache(
-                    key_cache_temp[src_slot_mapping_layer[misaligned_indices]],
-                    value_cache_temp[src_slot_mapping_layer[misaligned_indices]],
+                    key_cache_temp[misaligned_indices],
+                    value_cache_temp[misaligned_indices],
                     key_cache,
                     value_cache,
                     dst_slot_mapping[misaligned_indices],
@@ -225,10 +252,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                     attn_layer.attn._k_scale,
                     attn_layer.attn._v_scale,
                 )
-                #end_event.record()
-                #torch.cuda.synchronize()
-                #run_time = start_event.elapsed_time(end_event)
-                #print(f"mem movement time: {run_time}")
+                end_event.record()
+                torch.cuda.synchronize()
+                run_time = start_event.elapsed_time(end_event)
+                print(f"mem movement time: {run_time}")
             
             # pop src_slot_mapping to reduce memory usage
             self.src_slot_mappings.pop(seq_id, None)

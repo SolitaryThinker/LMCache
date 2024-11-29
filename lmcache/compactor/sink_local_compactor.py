@@ -44,33 +44,45 @@ class SinkCompactor(BaseLocalCompactor):
         """
         pass
     
+    # TODO (Jiayi): please fuse the positional encoding
     def adjust_positional_encoding(
         self,
         old_positions,
         new_positions,
         old_keys: torch.Tensor,
-        src_slot_mapping_layer,
     ):
         """
         reverse and recover the positional encoding
         """
         
-        num_tok = len(src_slot_mapping_layer)
-        reshaped_keys = old_keys[src_slot_mapping_layer].reshape(num_tok, -1)
+        #num_tok = len(src_slot_mapping_layer)
+        #reshaped_keys = old_keys[src_slot_mapping_layer]#.reshape(num_tok, -1)
         
+        """
         no_pos_keys = self.reverse_rotary_emb(
             torch.tensor(old_positions).to(device=old_keys.device,
                              dtype=torch.long),
-            reshaped_keys)
+            k=reshaped_keys)
         
         new_keys = self.reverse_rotary_emb(
-            torch.tensor(new_positions).to(device=old_keys.device,
-                             dtype=torch.long),
-            no_pos_keys,
+            new_positions = torch.tensor(new_positions).to(
+                            device=old_keys.device,
+                            dtype=torch.long),
+            old_positions=None,
+            k=no_pos_keys,
             is_reverse=False)
-        new_keys = new_keys.reshape(num_tok, self.num_kv_heads, self.head_size)
-        old_keys[src_slot_mapping_layer] = new_keys
-        return old_keys
+        """
+        new_keys = self.reverse_rotary_emb(
+            torch.tensor(old_positions).to(device=old_keys.device, 
+                                           dtype=torch.long),
+            torch.tensor(new_positions).to(device=old_keys.device, 
+                                           dtype=torch.long),
+            old_keys,
+            is_reverse=False,
+            is_fuse=True,
+        )
+        #new_keys = new_keys.reshape(num_tok, self.num_kv_heads, self.head_size)
+        return new_keys
     
     
     def compute_indices(self, seq_id, seq_len):

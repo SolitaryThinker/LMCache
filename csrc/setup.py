@@ -11,7 +11,8 @@ for s in source_files:
     if "torch_bindings" not in s:# and "expose" not in s:
         source_files_filtered.append(s)
 
-pos_encoding_files = ["vllm_csrc/pos_encoding_kernels_k.cu"]         
+pos_encoding_files = ["vllm_csrc/pos_encoding_kernels_k.cu",
+                      "vllm_csrc/pos_encoding_kernels_k_fused.cu"]         
 
 setup(
     name='lmc_ops',
