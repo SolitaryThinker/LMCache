@@ -72,11 +72,18 @@ class SinkCompactor(BaseLocalCompactor):
             k=no_pos_keys,
             is_reverse=False)
         """
+        #new_keys = self.reverse_rotary_emb(
+        #    torch.tensor(old_positions).to(device=old_keys.device, 
+        #                                   dtype=torch.long),
+        #    torch.tensor(new_positions).to(device=old_keys.device, 
+        #                                   dtype=torch.long),
+        #    old_keys,
+        #    is_reverse=False,
+        #    is_fuse=True,
+        #)
         new_keys = self.reverse_rotary_emb(
-            torch.tensor(old_positions).to(device=old_keys.device, 
-                                           dtype=torch.long),
-            torch.tensor(new_positions).to(device=old_keys.device, 
-                                           dtype=torch.long),
+            old_positions,
+            new_positions,
             old_keys,
             is_reverse=False,
             is_fuse=True,

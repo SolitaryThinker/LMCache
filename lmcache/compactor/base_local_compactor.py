@@ -140,10 +140,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
 
     # FIXME(Jiayi): Extremely slow now
     # Improved a lot, requires futher optimization
-    # 1. Let pos encoding be `inpace`, operating on paged memory directly
-    # 2. Let compaction be `inplace`
-    # 3. batching sequence
-    # 4. batching head 
+    # 1. batching sequence (no kernels needed) (DONE)
+    # 2. batching head 
+    # 3. Let pos encoding be `inpace`, operating on paged memory directly
+    # 4. Let compaction be `inplace`
     def compact_memory(
         self,
         model_input_subset,
@@ -157,11 +157,108 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         start_layer = model_input_subset.start_layer
         end_layer = model_input_subset.end_layer
         
-        #start_event = torch.cuda.Event(enable_timing=True)
-        #end_event = torch.cuda.Event(enable_timing=True)
-        #start_event.record()
         
-        # TODO(Jiayi): intra-batch memory movement should be batched 
+        
+        if len(dst_slot_mappings) == 0:
+            return
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        
+        dst_slot_mapping_batched = []
+        for seq_id, dst_slot_mapping in dst_slot_mappings.items():
+            dst_slot_mapping = torch.tensor(dst_slot_mapping, 
+                                            device=kv_caches[0][0].device)
+            dst_slot_mapping_batched.append(dst_slot_mapping)
+        dst_slot_mapping_batched = torch.cat(dst_slot_mapping_batched)
+        
+        for layer_idx in range(self.num_layers):
+            
+            src_slot_mapping_batched = []
+            old_positions_batched = []
+            new_positions_batched = []
+            
+            for seq_id, src_slot_mapping in self.src_slot_mappings.items():
+                src_slot_mapping = torch.tensor(src_slot_mapping[layer_idx],
+                                                device=kv_caches[0][0].device)
+                src_slot_mapping_batched.append(src_slot_mapping)
+                old_positions = torch.tensor(self.positions_tracker[seq_id][0][layer_idx],
+                                             device=kv_caches[0][0].device)
+                old_positions_batched.append(old_positions)
+                new_positions = torch.tensor(self.positions_tracker[seq_id][1][layer_idx],
+                                             device=kv_caches[0][0].device)
+                new_positions_batched.append(new_positions)
+ 
+            src_slot_mapping_batched = torch.cat(src_slot_mapping_batched)
+            old_positions_batched = torch.cat(old_positions_batched)
+            new_positions_batched = torch.cat(new_positions_batched)
+            
+            kv_cache = kv_caches[layer_idx]
+            attn_layer = attn_layers[layer_idx]
+            key_cache, value_cache = PagedAttention.split_kv_cache(
+                kv_cache, self.num_kv_heads, self.head_size)
+        
+            # perm & reshape K
+            key_cache_temp = key_cache.permute(0,3,1,2,4)
+            
+            # TODO(Jiayi): tensor is copied here. Please avoid this
+            key_cache_temp = key_cache_temp.reshape(
+                            -1, self.num_kv_heads, self.head_size)
+            key_cache_temp = key_cache_temp[src_slot_mapping_batched]
+            
+            #import pdb
+            #pdb.set_trace()
+            # adjust pos encoding of k
+            self.adjust_positional_encoding(
+                old_positions_batched,
+                new_positions_batched,
+                key_cache_temp,
+            )
+            
+            # perm & reshape V
+            value_cache_temp = value_cache.permute(0,3,1,2)
+            value_cache_temp = value_cache_temp.reshape(
+                            -1, self.num_kv_heads, self.head_size)
+            value_cache_temp = value_cache_temp[src_slot_mapping_batched]
+            
+            
+            assert len(src_slot_mapping_batched) == len(dst_slot_mapping_batched)
+            misaligned_indices = torch.where(
+                src_slot_mapping_batched != dst_slot_mapping_batched)[0]
+            
+            if len(misaligned_indices) == 0:
+                continue
+
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            start_event.record()
+            
+            # reshape_and_cache_flash is only used for flash attention
+            ops.reshape_and_cache(
+                key_cache_temp[misaligned_indices],
+                value_cache_temp[misaligned_indices],
+                key_cache,
+                value_cache,
+                dst_slot_mapping_batched[misaligned_indices],
+                attn_layer.attn.kv_cache_dtype,
+                attn_layer.attn._k_scale,
+                attn_layer.attn._v_scale,
+            )
+        
+        # pop src_slot_mapping to reduce memory usage
+        for seq_id in dst_slot_mappings.keys():
+            self.src_slot_mappings.pop(seq_id, None)
+            self.positions_tracker.pop(seq_id, None)
+        
+        end_event.record()
+        torch.cuda.synchronize()
+        run_time = start_event.elapsed_time(end_event)
+        print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
+        """
+        
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
         for seq_id, dst_slot_mapping in dst_slot_mappings.items():
             dst_slot_mapping = torch.tensor(dst_slot_mapping, 
                                             device=kv_caches[0][0].device)
@@ -237,9 +334,9 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 if len(misaligned_indices) == 0:
                     continue
 
-                start_event = torch.cuda.Event(enable_timing=True)
-                end_event = torch.cuda.Event(enable_timing=True)
-                start_event.record()
+                # start_event = torch.cuda.Event(enable_timing=True)
+                # end_event = torch.cuda.Event(enable_timing=True)
+                # start_event.record()
                 
                 # reshape_and_cache_flash is only used for flash attention
                 ops.reshape_and_cache(
@@ -252,20 +349,20 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                     attn_layer.attn._k_scale,
                     attn_layer.attn._v_scale,
                 )
-                end_event.record()
-                torch.cuda.synchronize()
-                run_time = start_event.elapsed_time(end_event)
-                print(f"mem movement time: {run_time}")
+                # end_event.record()
+                # torch.cuda.synchronize()
+                # run_time = start_event.elapsed_time(end_event)
+                # print(f"mem movement time: {run_time}")
             
             # pop src_slot_mapping to reduce memory usage
             self.src_slot_mappings.pop(seq_id, None)
             self.positions_tracker.pop(seq_id, None)
 
-        #end_event.record()
-        #torch.cuda.synchronize()
-        #run_time = start_event.elapsed_time(end_event)
-        #print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
-        
+        end_event.record()
+        torch.cuda.synchronize()
+        run_time = start_event.elapsed_time(end_event)
+        print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
+        """
         #print("done")
     def clean_request_states(
         self,
