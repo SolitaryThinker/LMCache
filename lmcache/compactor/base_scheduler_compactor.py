@@ -107,9 +107,8 @@ class BaseSchedulerCompactor:
                 block_manager._allocate_sequence(seq,
                                             seq_group.num_seqs(),
                                             is_encoder_decoder)
-            if len(block_table) == 623:
-                import pdb
-                pdb.set_trace()
+
+
             # Update block table
             block_manager.block_tables[seq.seq_id] = block_table
             

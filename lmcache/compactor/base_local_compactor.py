@@ -144,6 +144,8 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
     # 2. batching head 
     # 3. Let pos encoding be `inpace`, operating on paged memory directly
     # 4. Let compaction be `inplace`
+    # 5. need to minimize transfer somehow (e.g., how to free a token in the middle
+    # with only one block's free/allocate) -> is `block_size=1` the only way?
     def compact_memory(
         self,
         model_input_subset,
@@ -161,9 +163,9 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         
         if len(dst_slot_mappings) == 0:
             return
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
+        # start_event = torch.cuda.Event(enable_timing=True)
+        # end_event = torch.cuda.Event(enable_timing=True)
+        # start_event.record()
         
         dst_slot_mapping_batched = []
         for seq_id, dst_slot_mapping in dst_slot_mappings.items():
@@ -229,9 +231,6 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             if len(misaligned_indices) == 0:
                 continue
 
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
             
             # reshape_and_cache_flash is only used for flash attention
             ops.reshape_and_cache(
