@@ -65,6 +65,7 @@ We also provide multiple docker-based demos at [🔗LMCache-demos repo](https://
 # Interested in Connecting?
 Fill out the interest form and our team will reach out to you!
 https://forms.gle/mQfQDUXbKfp2St1z7
+Our Slack Channel: https://join.slack.com/t/lmcacheworkspace/shared_invite/zt-2viziwhue-5Amprc9k5hcIdXT7XevTaQ
 
 # 🛣️ Incoming Milestones
 
