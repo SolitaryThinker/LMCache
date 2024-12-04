@@ -45,14 +45,13 @@ class H2OCompactor(BaseLocalCompactor):
             attn_weight = chunked_attetnion_weights[layer_idx][idx]
             seq_len = attn_weight.shape[1]
             self.imp_scores[seq_id][layer_idx,:,:seq_len] += \
-                attn_weight[layer_idx][idx]
+                attn_weight
         
     def adjust_positional_encoding(
         self,
         old_positions,
         new_positions,
         old_keys: torch.Tensor,
-        src_slot_mapping_layer,
     ):
         """
         do nothing

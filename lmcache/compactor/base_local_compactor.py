@@ -249,10 +249,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             self.src_slot_mappings.pop(seq_id, None)
             self.positions_tracker.pop(seq_id, None)
         
-        end_event.record()
-        torch.cuda.synchronize()
-        run_time = start_event.elapsed_time(end_event)
-        print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
+        # end_event.record()
+        # torch.cuda.synchronize()
+        # run_time = start_event.elapsed_time(end_event)
+        # print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
         """
         
         start_event = torch.cuda.Event(enable_timing=True)
