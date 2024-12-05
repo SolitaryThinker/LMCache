@@ -22,15 +22,13 @@ class H2OCompactor(BaseLocalCompactor):
     def __init__(self, compactor_metadata):
         super().__init__(compactor_metadata)
         
-        self.min_window_size = 300
+        self.min_window_size = 256
         self.max_window_size = 512
     
     def decide_compact(
         self,
         seq_len) -> bool:
-        if seq_len % self.max_window_size == 0:
-            return True
-        return False        
+        return seq_len >= self.max_window_size     
     
     def update_imp_scores(
         self,
@@ -54,9 +52,17 @@ class H2OCompactor(BaseLocalCompactor):
         old_keys: torch.Tensor,
     ):
         """
-        do nothing
+        Not clearly mentioned in the paper. But seems to have better quality
+        with `adjusting_positional_encoding`.
         """
-        return old_keys
+        new_keys = self.reverse_rotary_emb(
+            old_positions,
+            new_positions,
+            old_keys,
+            is_reverse=False,
+            is_fuse=True,
+        )
+        return new_keys
     
     def compute_indices(
         self,
@@ -74,7 +80,7 @@ class H2OCompactor(BaseLocalCompactor):
             sum_scores_layer = torch.sum(imp_score[layer_idx], dim=0)
             imp_indices_layer = torch.topk(
                 sum_scores_layer, k=self.min_window_size).indices
-            
+            imp_indices_layer = torch.sort(imp_indices_layer).values
             # TODO: please get rid of this `tolist`
             imp_indices_layer = imp_indices_layer.tolist()
             compacted_indices.append(imp_indices_layer)
@@ -83,5 +89,6 @@ class H2OCompactor(BaseLocalCompactor):
             imp_score[layer_idx,: , :self.min_window_size] = \
                 imp_score[layer_idx, :, imp_indices_layer]
             imp_score[layer_idx,: , self.min_window_size:] = 0
-        
+        #import pdb
+        #pdb.set_trace()
         return compacted_indices

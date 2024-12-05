@@ -20,8 +20,8 @@ class SinkCompactor(BaseLocalCompactor):
     def __init__(self, compactor_metadata):
         super().__init__(compactor_metadata)
         
-        self.min_window_size = 300
-        self.max_window_size = 512
+        self.min_window_size = 512
+        self.max_window_size = 1024
         self.num_sink = 4
         
         
@@ -29,9 +29,7 @@ class SinkCompactor(BaseLocalCompactor):
     def decide_compact(
         self,
         seq_len) -> bool:
-        if seq_len >= self.max_window_size:
-            return True
-        return False
+        return seq_len >= self.max_window_size
     
     def update_imp_scores(
         self,
@@ -55,32 +53,6 @@ class SinkCompactor(BaseLocalCompactor):
         reverse and recover the positional encoding
         """
         
-        #num_tok = len(src_slot_mapping_layer)
-        #reshaped_keys = old_keys[src_slot_mapping_layer]#.reshape(num_tok, -1)
-        
-        """
-        no_pos_keys = self.reverse_rotary_emb(
-            torch.tensor(old_positions).to(device=old_keys.device,
-                             dtype=torch.long),
-            k=reshaped_keys)
-        
-        new_keys = self.reverse_rotary_emb(
-            new_positions = torch.tensor(new_positions).to(
-                            device=old_keys.device,
-                            dtype=torch.long),
-            old_positions=None,
-            k=no_pos_keys,
-            is_reverse=False)
-        """
-        #new_keys = self.reverse_rotary_emb(
-        #    torch.tensor(old_positions).to(device=old_keys.device, 
-        #                                   dtype=torch.long),
-        #    torch.tensor(new_positions).to(device=old_keys.device, 
-        #                                   dtype=torch.long),
-        #    old_keys,
-        #    is_reverse=False,
-        #    is_fuse=True,
-        #)
         new_keys = self.reverse_rotary_emb(
             old_positions,
             new_positions,
@@ -88,7 +60,6 @@ class SinkCompactor(BaseLocalCompactor):
             is_reverse=False,
             is_fuse=True,
         )
-        #new_keys = new_keys.reshape(num_tok, self.num_kv_heads, self.head_size)
         return new_keys
     
     

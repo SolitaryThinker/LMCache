@@ -528,16 +528,25 @@ __device__ void paged_attention_compact_kernel(
       }
     }
   }
+  
+  
+  // TODO(Jiayi): should be passed in from params
+  // NOTE(Jiayi): starts
+  int prefix_sum_len = 0;
+  for (int i = 0; i < seq_idx; i++){
+    prefix_sum_len += seq_lens[i];
+  }
+  // NOTE(Jiayi): ends
 
+  // NOTE(Jiayi): starts
   for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
-    // NOTE(Jiayi): starts
     // A potential improvement would be update the logits here
     // before writing it to the HBM
     // save logits from shared mem to HBM
-    logits_store[head_idx*logits_store_buffer_step + i] = logits[i];
+    logits_store[head_idx*logits_store_buffer_step + prefix_sum_len + i] = logits[i];
     //printf("Assign (%d, %d) %f\n", head_idx*num_tokens + i, i, logits[i]);
-    // NOTE(Jiayi): ends
   }
+  // NOTE(Jiayi): ends
 }
 
 // Grid: (num_heads, num_seqs, 1).
@@ -548,7 +557,7 @@ __global__ void paged_attention_v1_compact_kernel(
     // NOTE(Jiayi): starts
     float* __restrict__ logits_store,  // [num_heads, num_toks]
     const int logits_store_buffer_step,
-    // NOTE(Jiayi): starts
+    // NOTE(Jiayi): ends
     scalar_t* __restrict__ out,           // [num_seqs, num_heads, head_size]
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
     const cache_t* __restrict__ k_cache,  // [num_blocks, num_kv_heads,
@@ -837,7 +846,8 @@ void paged_attention_v1_compact_launcher(
 #define CALL_V1_COMPACT_LAUNCHER(T, CACHE_T, BLOCK_SIZE, KV_DTYPE, IS_BLOCK_SPARSE)  \
   paged_attention_v1_compact_launcher<T, CACHE_T, BLOCK_SIZE, KV_DTYPE,              \
                               IS_BLOCK_SPARSE>(                              \
-      logits_store, out, query, key_cache, value_cache, num_kv_heads, scale, block_tables, \
+      logits_store,                                                         \
+      out, query, key_cache, value_cache, num_kv_heads, scale, block_tables, \
       seq_lens, max_seq_len, alibi_slopes, k_scale, v_scale, tp_rank,        \
       blocksparse_local_blocks, blocksparse_vert_stride,                     \
       blocksparse_block_size, blocksparse_head_sliding_step);

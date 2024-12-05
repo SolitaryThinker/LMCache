@@ -230,7 +230,6 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             
             if len(misaligned_indices) == 0:
                 continue
-
             
             # reshape_and_cache_flash is only used for flash attention
             ops.reshape_and_cache(
@@ -253,116 +252,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         # torch.cuda.synchronize()
         # run_time = start_event.elapsed_time(end_event)
         # print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
-        """
-        
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
-        for seq_id, dst_slot_mapping in dst_slot_mappings.items():
-            dst_slot_mapping = torch.tensor(dst_slot_mapping, 
-                                            device=kv_caches[0][0].device)
-            
-            # TODO(Jiayi): Figure out why there are pending 0s in block_tables
-            # Might be related to cuda graph & max batch_size
-            # https://github.com/vllm-project/vllm/blob/ad23318928d40ef7ac969451afa0dc198428c04b/vllm/attention/backends/flash_attn.py#L370
-            
-            # TODO(Jiayi): optimize the following code into a cuda kernel?
-            # or at least into a separate function
-            for layer_idx, src_slot_mapping_layer in \
-                enumerate(self.src_slot_mappings[seq_id]):
-                kv_cache = kv_caches[layer_idx]
-                attn_layer = attn_layers[layer_idx]
-                
-                # start_event = torch.cuda.Event(enable_timing=True)
-                # end_event = torch.cuda.Event(enable_timing=True)
-                # start_event.record()
-                key_cache, value_cache = PagedAttention.split_kv_cache(
-                        kv_cache, self.num_kv_heads, self.head_size)
-                # end_event.record()
-                # torch.cuda.synchronize()
-                # run_time = start_event.elapsed_time(end_event)
-                # print(f"kv split time: {run_time}")
-                
-                #import pdb
-                #pdb.set_trace()
-                # start_event = torch.cuda.Event(enable_timing=True)
-                # end_event = torch.cuda.Event(enable_timing=True)
-                # start_event.record()
-                key_cache_temp = key_cache.permute(0,3,1,2,4)
-                key_cache_temp = key_cache_temp.reshape(
-                                -1, self.num_kv_heads, self.head_size)
-                key_cache_temp = key_cache_temp[src_slot_mapping_layer]
-                # end_event.record()
-                # torch.cuda.synchronize()
-                # run_time = start_event.elapsed_time(end_event)
-                # print(f"key perm reshape time: {run_time}")
 
-                # start_event = torch.cuda.Event(enable_timing=True)
-                # end_event = torch.cuda.Event(enable_timing=True)
-                # start_event.record()
-                self.adjust_positional_encoding(
-                    self.positions_tracker[seq_id][0][layer_idx],
-                    self.positions_tracker[seq_id][1][layer_idx],
-                    key_cache_temp,
-                )
-                # end_event.record()
-                # torch.cuda.synchronize()
-                # run_time = start_event.elapsed_time(end_event)
-                # print(f"pos encoding time: {run_time}")
-                
-                # start_event = torch.cuda.Event(enable_timing=True)
-                # end_event = torch.cuda.Event(enable_timing=True)
-                # start_event.record()
-                value_cache_temp = value_cache.permute(0,3,1,2)
-                value_cache_temp = value_cache_temp.reshape(
-                                -1, self.num_kv_heads, self.head_size)
-                value_cache_temp = value_cache_temp[src_slot_mapping_layer]
-                # end_event.record()
-                # torch.cuda.synchronize()
-                # run_time = start_event.elapsed_time(end_event)
-                # print(f"value perm reshape time: {run_time}")
-                
-                src_slot_mapping_layer = torch.tensor(
-                    src_slot_mapping_layer, 
-                    device=dst_slot_mapping.device)
-                
-                assert len(src_slot_mapping_layer) == len(dst_slot_mapping)
-                misaligned_indices = torch.where(
-                    src_slot_mapping_layer != dst_slot_mapping)[0]
-                
-                if len(misaligned_indices) == 0:
-                    continue
-
-                # start_event = torch.cuda.Event(enable_timing=True)
-                # end_event = torch.cuda.Event(enable_timing=True)
-                # start_event.record()
-                
-                # reshape_and_cache_flash is only used for flash attention
-                ops.reshape_and_cache(
-                    key_cache_temp[misaligned_indices],
-                    value_cache_temp[misaligned_indices],
-                    key_cache,
-                    value_cache,
-                    dst_slot_mapping[misaligned_indices],
-                    attn_layer.attn.kv_cache_dtype,
-                    attn_layer.attn._k_scale,
-                    attn_layer.attn._v_scale,
-                )
-                # end_event.record()
-                # torch.cuda.synchronize()
-                # run_time = start_event.elapsed_time(end_event)
-                # print(f"mem movement time: {run_time}")
-            
-            # pop src_slot_mapping to reduce memory usage
-            self.src_slot_mappings.pop(seq_id, None)
-            self.positions_tracker.pop(seq_id, None)
-
-        end_event.record()
-        torch.cuda.synchronize()
-        run_time = start_event.elapsed_time(end_event)
-        print(f"memory compaction time, {len(dst_slot_mappings)} seqs: {run_time}")
-        """
-        #print("done")
     def clean_request_states(
         self,
         end_seq_ids,
@@ -415,7 +305,6 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 seq_lens, dim=1)
             chunked_attetnion_weights.append(chunked_buffer)
             self.logits_buffer_queue.put(buffer)
-        
         
         #start_event = torch.cuda.Event(enable_timing=True)
         #end_event = torch.cuda.Event(enable_timing=True)
