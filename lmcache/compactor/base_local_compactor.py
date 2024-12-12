@@ -60,6 +60,9 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         # `gpu_memory_utilization` is set too high in vllm
         # TODO: Also, please make it more flexible
         max_num_tokens = 144400
+
+        chunked_prefill_max_num_batched_tokens = 512
+        max_window_size = 1500
         
         
         # The logits buffer need to be preallocated
@@ -73,6 +76,15 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                         device=self.device,
                         dtype=torch.float32)
                 )
+
+        self.prefill_logits_buffer_queue = queue.Queue()
+        for i in range(self.num_layers):
+            self.prefill_logits_buffer_queue.put(
+                torch.full((2, self.num_heads, chunked_prefill_max_num_batched_tokens, max_window_size),
+                    -float('inf'),
+                    device=self.device,
+                    dtype=torch.float32)
+                )
     
     
     @abc.abstractmethod
@@ -80,7 +92,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         self,
         seq_id,
         idx,
-        chunked_attetnion_weights):
+        prefill_chunked_attention_weights,
+        decode_chunked_attention_weights,
+        seq_len,
+        is_prefill=False):
         """
         update importance scores
         """
@@ -285,45 +300,74 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         prefill_meta = attn_meta.prefill_metadata
         
         seq_lens = attn_meta.seq_lens
-        sum_seq_len = sum(seq_lens)
-        
-        chunked_attetnion_weights = None
-        
-        # FIXME(Jiayi): we are skipping prefill for now
-        is_all_prefill_run = ((attn_meta.num_prefills == len(seq_lens))\
-            and prefill_meta is not None)
-        
-        if is_all_prefill_run:
-            null_compactor_output = CompactorOutput(compacted_indices_dict={})
-            return null_compactor_output
-           
-        chunked_attetnion_weights = []
-        for i in range(self.num_layers):
-            buffer = self.logits_buffer_queue.get()
-            chunked_buffer = torch.split(
-                buffer[:, :sum_seq_len], 
-                seq_lens, dim=1)
-            chunked_attetnion_weights.append(chunked_buffer)
-            self.logits_buffer_queue.put(buffer)
-        
+
+        prefill_chunked_attention_weights = []
+        num_prefills = attn_meta.num_prefills
+        if num_prefills > 0:
+            prefill_seq_lens = seq_lens[:num_prefills]
+
+            # chunked_attetnion_weights = chunked_attention_weights
+            for layer_idx in range(self.num_layers):
+                buffer = self.prefill_logits_buffer_queue.get()
+                batch = []
+                for i in range(num_prefills):
+                    normalized_buffer = torch.nn.functional.softmax(buffer[i, :, :prefill_seq_lens[i]%512, :prefill_seq_lens[i]], dim=-1)
+                    batch.append(normalized_buffer)
+                prefill_chunked_attention_weights.append(batch)
+                self.prefill_logits_buffer_queue.put(buffer)
+        # print('prefill_chunked_attention_weights', prefill_chunked_attention_weights)
+
+        decode_chunked_attention_weights = []
+        if attn_meta.num_decode_tokens > 0:
+            decode_seq_lens = seq_lens[attn_meta.num_prefills:]
+            sum_decode_seq_len = sum(decode_seq_lens)
+            for layer_idx in range(self.num_layers):
+                buffer = self.logits_buffer_queue.get()
+                chunked_buffer = torch.split(
+                    buffer[:, :sum_decode_seq_len], 
+                    decode_seq_lens, dim=1)
+                decode_chunked_attention_weights.append(chunked_buffer)
+                self.logits_buffer_queue.put(buffer)
         #start_event = torch.cuda.Event(enable_timing=True)
         #end_event = torch.cuda.Event(enable_timing=True)
         #start_event.record()
+
+        # assert len(prefill_chunked_attention_weights) == self.num_layers
+        # assert len(decode_chunked_attention_weights) == self.num_layers
+        # assert len(seq_group_metadata_list) == attn_meta.num_prefills + attn_meta.num_decode_tokens, f"len(seq_group_metadata_list): {len(seq_group_metadata_list)}, attn_meta.num_prefills: {attn_meta.num_prefills}, attn_meta.num_decode_tokens: {attn_meta.num_decode_tokens}"
+
         
         compacted_indices_dict = {}
         idx = 0
         for seq_group_metadata in seq_group_metadata_list:
             request_id = seq_group_metadata.request_id
             seq_ids = model_input.request_ids_to_seq_ids[request_id]
+            # print('==========seq_ids', seq_ids)
             for seq_id in seq_ids:
-                if chunked_attetnion_weights is not None:
-                    self.update_imp_scores(
-                        seq_id,
-                        idx,
-                        chunked_attetnion_weights,
-                    )
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 seq_len = seq_data.get_len()
+                # print('current seq_len', seq_len)
+                if (prefill_chunked_attention_weights is not None and 
+                    decode_chunked_attention_weights is not None):
+                    # print('is_prefill', seq_group_metadata.is_prompt)
+                    # print('seq_lens', seq_lens)
+                    # print('attn_meta.num_prefills', attn_meta.num_prefills)
+                    # print('attn_meta.num_prefills', attn_meta.context_lens_tensor)
+                    # print('attn_meta.num_prefills', attn_meta.seq_lens)
+                    # print('len(seq_group_metadata_list)', len(seq_group_metadata_list))
+                    # print('attn_meta.num_decode_tokens', attn_meta.num_decode_tokens)
+                    # print('context_lens', attn_meta.context_lens_tensor)
+                    # print('seq_len', seq_len)
+                    is_prefill = seq_group_metadata.is_prompt
+                    tmp_idx = idx if is_prefill else idx - attn_meta.num_prefills
+                    self.update_imp_scores(
+                        seq_id,
+                        tmp_idx,
+                        prefill_chunked_attention_weights,
+                        decode_chunked_attention_weights,
+                        attn_meta,
+                        is_prefill=seq_group_metadata.is_prompt,
+                    )
                 
                 # Decide whether to perform compaction
                 if not self.decide_compact(seq_len):
@@ -335,15 +379,18 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
                              f"-> {len(compacted_indices[0])}")
                 compacted_indices_dict[seq_id] = compacted_indices
+                # print(f"compacted_indices: {compacted_indices}")
 
                 # update src_slot_mappings
                 slot_mapping = []
                 compute_slot_mapping(False, slot_mapping, seq_id, seq_len, 
                     0, 0, self.vllm_block_size, seq_group_metadata.block_tables)
+                # print(f"slot_mapping: {slot_mapping}")
                 
                 # FIXME(Jiayi): Please move this part inside the real compactor
                 if seq_id not in self.positions_tracker:
                     old_positions = [[i for i in range(seq_len)] for j in range(len(compacted_indices))]
+                    # print(f"old_positions: {old_positions}")
                 else:
                     old_positions = self.positions_tracker[seq_id][1]
                 
