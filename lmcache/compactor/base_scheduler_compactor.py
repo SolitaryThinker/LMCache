@@ -37,6 +37,8 @@ class BaseSchedulerCompactor:
         
         for seq in seq_group.get_seqs():
             seq_id = seq.seq_id
+            # print(f"scheduler compactor checking seq_id: {seq_id}")
+            # print(f"compacted_indices_dict: {compacted_indices_dict.keys()}")
             # Check whether the current seq_id needs to be compacted
             if seq_id not in compacted_indices_dict:
                 continue
@@ -132,8 +134,8 @@ class BaseSchedulerCompactor:
             # Update dst_slot_mapping
             dst_slot_mappings[seq_id] = compacted_slot_mapping
             
-            logger.debug(f"[Compactor] base_scheduler_compactor taking effect! seq_id: {seq_id}")
-            logger.debug(f"[Compactor] compacted_slot_mapping len: {len(compacted_slot_mapping)}")
+            # logger.debug(f"[Compactor] base_scheduler_compactor taking effect! seq_id: {seq_id}")
+            # logger.debug(f"[Compactor] compacted_slot_mapping len: {len(compacted_slot_mapping)}")
             
         #end_event.record()
         #torch.cuda.synchronize()

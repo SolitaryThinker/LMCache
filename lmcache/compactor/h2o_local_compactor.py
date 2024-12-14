@@ -22,14 +22,20 @@ class H2OCompactor(BaseLocalCompactor):
     def __init__(self, compactor_metadata):
         super().__init__(compactor_metadata)
         
-        self.min_window_size = 900
-        self.max_window_size = 1500
-        self.evict_threshold = 1000
+        self.min_window_size = 700
+        self.max_window_size = 1600
+        self.evict_threshold = 100
     
     def decide_compact(
         self,
-        seq_len) -> bool:
-        return seq_len >= self.max_window_size     
+        seq_len,
+        prompt_length) -> bool:
+        # print(f"prompt_length: {prompt_length}")
+        # threshold = int((1+self.evict_threshold)*prompt_length)
+        threshold = prompt_length + self.evict_threshold
+        # print(f"decide_compact seq_len: {seq_len}, threshold: {threshold}")
+        return seq_len >= threshold and seq_len > self.min_window_size
+
     
     def update_imp_scores(
         self,
@@ -74,7 +80,7 @@ class H2OCompactor(BaseLocalCompactor):
                 # # print('attn_weight', attn_weight)
                 # # check that attn_weight are all ones 
                 # print('imp_scores', self.imp_scores[seq_id][layer_idx,:, start:end].shape)
-                print(f"seq_len: {seq_len}")
+                # print(f"seq_len: {seq_len}")
                 self.imp_scores[seq_id][layer_idx,:, :seq_len] += \
                     attn_weight
         
@@ -86,9 +92,9 @@ class H2OCompactor(BaseLocalCompactor):
                 # print('shapes1 ', self.imp_scores[seq_id].shape)
                 # print('shapes', self.imp_scores[seq_id][layer_idx,:].shape)
                 # print('attn_weight shapes', attn_weight.shape)
-                print(f"seq_len: {seq_len}")
+                # print(f"seq_len: {seq_len}")
                 self.imp_scores[seq_id][layer_idx,:, :seq_len] += \
-                    attn_weight
+                    attn_weight[:, :seq_len]
         # print('imp_scores', self.imp_scores[seq_id][2,5,:50])
         
     def adjust_positional_encoding(
@@ -124,19 +130,24 @@ class H2OCompactor(BaseLocalCompactor):
         for layer_idx in range(self.num_layers):
             # sum of all heads
             sum_scores_layer = torch.sum(imp_score[layer_idx], dim=0)
-            # print(f"shape of sum_scores_layer: {sum_scores_layer.shape}")
+            # if seq_id == 1068:
+            #     print(f"shape of sum_scores_layer: {sum_scores_layer.shape}")
+            #     print(f"sum_scores_layer: {sum_scores_layer}")
+            k = min(self.min_window_size, seq_len)
             imp_indices_layer = torch.topk(
-                sum_scores_layer, k=self.min_window_size).indices
+                sum_scores_layer[:seq_len], k=k).indices
             imp_indices_layer = torch.sort(imp_indices_layer).values
+            # if seq_id == 1068:
+            #     print(f"imp_indices_layer: {imp_indices_layer}")
             # print(f"shape of imp_indices_layer: {imp_indices_layer.shape}")
             # TODO: please get rid of this `tolist`
             imp_indices_layer = imp_indices_layer.tolist()
             compacted_indices.append(imp_indices_layer)
 
             # compact imp_scores
-            imp_score[layer_idx,: , :self.min_window_size] = \
+            imp_score[layer_idx,: , :k] = \
                 imp_score[layer_idx, :, imp_indices_layer]
-            imp_score[layer_idx,: , self.min_window_size:] = 0
+            imp_score[layer_idx,: , k:] = 0
         #import pdb
         #pdb.set_trace()
         return compacted_indices

@@ -25,6 +25,12 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         # NOTE(Jiayi): keeping src_slot_mappings in local compactor
         # minimizes communication overhead between scheduler and worker
          
+        # NOTE(will): this is used to track finished seq_ids so that we can
+        # remove them from the compactor states. This is due to the fact that 
+        # _free_finished_seqs does not remove the seq_ids from the model_input
+        # object.
+        self.finished_seq_ids = []
+
         #{seq_idx: num_layers * slot_mapping}
         self.src_slot_mappings = {}
         # track old and new positions for position recovery
@@ -118,6 +124,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
     def decide_compact(
         self,
         seq_len,
+        prompt_length,
     ) -> bool:
         """
         Decide whether to perform compaction
@@ -196,9 +203,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             new_positions_batched = []
             
             for seq_id, src_slot_mapping in self.src_slot_mappings.items():
-                src_slot_mapping = torch.tensor(src_slot_mapping[layer_idx],
+                # print(f'seq_id: {seq_id}, len(src_slot_mapping): {len(src_slot_mapping[0])}')
+                src_slot_mapping_temp = torch.tensor(src_slot_mapping[layer_idx],
                                                 device=kv_caches[0][0].device)
-                src_slot_mapping_batched.append(src_slot_mapping)
+                src_slot_mapping_batched.append(src_slot_mapping_temp)
                 old_positions = torch.tensor(self.positions_tracker[seq_id][0][layer_idx],
                                              device=kv_caches[0][0].device)
                 old_positions_batched.append(old_positions)
@@ -206,7 +214,11 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                                              device=kv_caches[0][0].device)
                 new_positions_batched.append(new_positions)
  
+            # for i in range(len(src_slot_mapping_batched)):
+            #     print(f"shape of src_slot_mapping_batched[{i}]: {src_slot_mapping_batched[i].shape}")
             src_slot_mapping_batched = torch.cat(src_slot_mapping_batched)
+            # print(f"shape of src_slot_mapping_batched: {src_slot_mapping_batched.shape}")
+            # print(f"shape of dst_slot_mapping_batched: {dst_slot_mapping_batched.shape}")
             old_positions_batched = torch.cat(old_positions_batched)
             new_positions_batched = torch.cat(new_positions_batched)
             
@@ -239,7 +251,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             value_cache_temp = value_cache_temp[src_slot_mapping_batched]
             
             
-            assert len(src_slot_mapping_batched) == len(dst_slot_mapping_batched)
+            assert len(src_slot_mapping_batched) == len(dst_slot_mapping_batched), f"len(src_slot_mapping_batched): {len(src_slot_mapping_batched)}, len(dst_slot_mapping_batched): {len(dst_slot_mapping_batched)}"
             misaligned_indices = torch.where(
                 src_slot_mapping_batched != dst_slot_mapping_batched)[0]
             
@@ -278,7 +290,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             self.src_slot_mappings.pop(end_seq_id, None)
             self.positions_tracker.pop(end_seq_id, None)
             self.imp_scores.pop(end_seq_id, None)
-        
+            self.finished_seq_ids.append(end_seq_id)
     
     def post_model_update(
         self,
@@ -344,6 +356,9 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             seq_ids = model_input.request_ids_to_seq_ids[request_id]
             # print('==========seq_ids', seq_ids)
             for seq_id in seq_ids:
+                # print(f"seq_id: {seq_id}, finished_seq_ids: {self.finished_seq_ids}")
+                if seq_id in self.finished_seq_ids:
+                    continue
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 seq_len = seq_data.get_len()
                 # print('current seq_len', seq_len)
@@ -370,10 +385,14 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                     )
                 
                 # Decide whether to perform compaction
-                if not self.decide_compact(seq_len):
+                # print(f"decide_compact seq_len: {seq_len}")
+                # print(f"decide_compact prompt_length: {seq_data.get_prompt_len()}")
+                if not self.decide_compact(seq_len, seq_data.get_prompt_len()):
+                    # print('compact skipped', seq_id)
                     idx += 1
                     continue
-                
+
+                # print('compacting', seq_id)
                 compacted_indices = self.compute_indices(seq_id, seq_len)
                 logger.debug(f"[Compactor] local_compactor taking effect! seq_id: {seq_id}")
                 logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
@@ -396,12 +415,24 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 
                 updated_old_positions = []
                 new_positions = []
-                for layer_idx, compacted_indices_layer in enumerate(compacted_indices):
-                    updated_old_positions.append(
-                        [old_positions[layer_idx][i] for i in compacted_indices_layer])
-                    
-                    new_positions.append(
-                        [i for i in range(len(compacted_indices_layer))])
+                try:
+                    for layer_idx, compacted_indices_layer in enumerate(compacted_indices):
+                        updated_old_positions.append(
+                            [old_positions[layer_idx][i] for i in compacted_indices_layer])
+                        
+                        new_positions.append(
+                            [i for i in range(len(compacted_indices_layer))])
+                except Exception as e:
+                    print(f"Error in post_model_update: {e}")
+                    print(f"compacted_indices: {compacted_indices}")
+                    print(f"old_positions: {old_positions}")
+
+                    # print shapes
+                    print(f"compacted_indices: {len(compacted_indices[0])}")
+                    print(f"old_positions: {len(old_positions[0])}")
+                    print(f"seq_id: {seq_id}")
+                    print(f"seq_len: {seq_len}")
+                    raise e
                 
                 self.positions_tracker[seq_id] = (updated_old_positions, new_positions)
                 
@@ -413,11 +444,16 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                     compacted_slot_mapping.append(
                         [slot_mapping[i] for i in compacted_indices_layer])
                 
+                # print(f"len compacted_slot_mapping: {len(compacted_slot_mapping[0])}")
                 self.src_slot_mappings[seq_id] = compacted_slot_mapping
                 idx += 1
                 
         compactor_output = CompactorOutput(
             compacted_indices_dict=compacted_indices_dict,)
+
+        # clear finished seq_ids
+        # print(f"=====CLEANING finished_seq_ids: {self.finished_seq_ids}")
+        self.finished_seq_ids.clear()
         
         #end_event.record()
         #torch.cuda.synchronize()
