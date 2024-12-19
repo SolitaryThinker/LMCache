@@ -22,20 +22,36 @@ class H2OCompactor(BaseLocalCompactor):
     def __init__(self, compactor_metadata):
         super().__init__(compactor_metadata)
         
-        self.min_window_size = 700
-        self.max_window_size = 1600
-        self.evict_threshold = 100
+        self.min_window_size = 1000
+        self.max_window_size = 200
+        self.evict_threshold = 50
+        self.evict_number = 1
+        self.prompt_lengths = {}
     
     def decide_compact(
         self,
+        seq_id,
         seq_len,
         prompt_length) -> bool:
+        # return False
         # print(f"prompt_length: {prompt_length}")
         # threshold = int((1+self.evict_threshold)*prompt_length)
         threshold = prompt_length + self.evict_threshold
+        if seq_id not in self.prompt_lengths:
+            self.prompt_lengths[seq_id] = prompt_length
         # print(f"decide_compact seq_len: {seq_len}, threshold: {threshold}")
-        return seq_len >= threshold and seq_len > self.min_window_size
-
+        # return seq_len >= threshold and seq_len > self.min_window_size
+        return seq_len >= threshold
+    
+    def clean_request_states(
+        self,
+        end_seq_ids,
+    ):
+        if end_seq_ids is None:
+            return
+        for end_seq_id in end_seq_ids:
+            self.prompt_lengths.pop(end_seq_id, None)
+        super().clean_request_states(end_seq_ids)
     
     def update_imp_scores(
         self,
@@ -94,7 +110,7 @@ class H2OCompactor(BaseLocalCompactor):
                 # print('attn_weight shapes', attn_weight.shape)
                 # print(f"seq_len: {seq_len}")
                 self.imp_scores[seq_id][layer_idx,:, :seq_len] += \
-                    attn_weight[:, :seq_len]
+                    attn_weight
         # print('imp_scores', self.imp_scores[seq_id][2,5,:50])
         
     def adjust_positional_encoding(
@@ -127,13 +143,16 @@ class H2OCompactor(BaseLocalCompactor):
         """
         compacted_indices = []
         imp_score = self.imp_scores[seq_id]
+        prompt_length = self.prompt_lengths[seq_id]
         for layer_idx in range(self.num_layers):
             # sum of all heads
             sum_scores_layer = torch.sum(imp_score[layer_idx], dim=0)
             # if seq_id == 1068:
             #     print(f"shape of sum_scores_layer: {sum_scores_layer.shape}")
             #     print(f"sum_scores_layer: {sum_scores_layer}")
-            k = min(self.min_window_size, seq_len)
+            # k = min(self.min_window_size, seq_len)
+            # k = min(self.evict_number, seq_len)
+            k = seq_len - self.evict_number
             imp_indices_layer = torch.topk(
                 sum_scores_layer[:seq_len], k=k).indices
             imp_indices_layer = torch.sort(imp_indices_layer).values

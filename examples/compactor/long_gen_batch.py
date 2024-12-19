@@ -7,7 +7,8 @@ import time
 from lmcache_vllm.vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+# model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+model_name = "meta-llama/Llama-3.1-8B-Instruct"
 context_file = os.path.join(os.pardir, 'ffmpeg.txt')
 output_file = "offline_inference_outputs.jsonl"
 
@@ -65,6 +66,9 @@ user_inputs_batch = [
     "Please include some details."
     "Your answer should be around 5k words",
 ]
+user_inputs_batch = [
+    "What is FFmpeg?"
+]
 
 
 def get_context_length(tokenizer, context_messages):
@@ -105,16 +109,21 @@ def append_outputs(output_file_name, outputs, context_length, time_taken):
 context_length = get_context_length(tokenizer, context_messages)
 # Create a sampling params object.
 
-sampling_params = SamplingParams(temperature=0.0, top_p=0.95, max_tokens=600)
+sampling_params = SamplingParams(temperature=0.0, top_p=0.95, max_tokens=200)
 
-prompts = gen_prompts(tokenizer, context_messages, user_inputs_batch)
+# prompts = gen_prompts(tokenizer, context_messages, user_inputs_batch)
+prompts = user_inputs_batch
 l = get_prompt_length(tokenizer, prompts[0])
+print(f"prompts: {prompts}")
+# print('context_length', context_length)
+print('prompt length', l)
+
 # Create an LLM.
 llm = LLM(model=model_name,
           gpu_memory_utilization=0.8,
           enable_chunked_prefill=True,
           max_model_len=32768,
-          max_num_batched_tokens=5,
+          max_num_batched_tokens=100,
           max_num_seqs=5,
           enforce_eager=True)
 
@@ -125,12 +134,13 @@ with open(output_file, "w") as f:
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
 
-print(f"prompts: {prompts}")
-# print('context_length', context_length)
-print('prompt length', l)
 # print(f"prompts: {prompts}")
 t1 = time.perf_counter()
-second_outputs = llm.generate(prompts, sampling_params)
+second_outputs = llm.generate(prompts*2, sampling_params)
 t2 = time.perf_counter()
 print(f"\n\nRequest Time: {t2 - t1} seconds\n\n")
 print(f"Output: {second_outputs}")
+
+print("prompt length", l)
+print(second_outputs[0].outputs[0].text)
+print('stop reason', second_outputs[0].outputs[0].stop_reason)

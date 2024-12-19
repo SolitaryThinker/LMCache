@@ -68,7 +68,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         max_num_tokens = 144400
 
         chunked_prefill_max_num_batched_tokens = 512
-        max_window_size = 1500
+        max_window_size = 200
         
         
         # The logits buffer need to be preallocated
@@ -123,6 +123,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def decide_compact(
         self,
+        seq_id,
         seq_len,
         prompt_length,
     ) -> bool:
@@ -322,8 +323,15 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             for layer_idx in range(self.num_layers):
                 buffer = self.prefill_logits_buffer_queue.get()
                 batch = []
+                # TODO(will) hack to limit buffer size
+                assert num_prefills <= 2
+                # print("num_prefills", num_prefills)
                 for i in range(num_prefills):
-                    normalized_buffer = torch.nn.functional.softmax(buffer[i, :, :prefill_seq_lens[i]%512, :prefill_seq_lens[i]], dim=-1)
+                    # normalized_buffer = torch.nn.functional.softmax(buffer[i, :, :prefill_seq_lens[i]%512, :prefill_seq_lens[i]], dim=-1)
+                    normalized_buffer = buffer[i, :, :prefill_seq_lens[i]%512, :prefill_seq_lens[i]]
+                    # print("normalized_buffer", normalized_buffer.shape)
+                    # print('normalized_buffer', normalized_buffer[0])
+                    # normalized_buffer = normalized_buffer.to(torch.float16)
                     batch.append(normalized_buffer)
                 prefill_chunked_attention_weights.append(batch)
                 self.prefill_logits_buffer_queue.put(buffer)
@@ -387,7 +395,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 # Decide whether to perform compaction
                 # print(f"decide_compact seq_len: {seq_len}")
                 # print(f"decide_compact prompt_length: {seq_data.get_prompt_len()}")
-                if not self.decide_compact(seq_len, seq_data.get_prompt_len()):
+                if not self.decide_compact(seq_id, seq_len, seq_data.get_prompt_len()):
                     # print('compact skipped', seq_id)
                     idx += 1
                     continue
@@ -398,7 +406,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
                              f"-> {len(compacted_indices[0])}")
                 compacted_indices_dict[seq_id] = compacted_indices
-                # print(f"compacted_indices: {compacted_indices}")
+                print(f"compacted_indices: {compacted_indices}")
 
                 # update src_slot_mappings
                 slot_mapping = []
